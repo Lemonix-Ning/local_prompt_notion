@@ -1,0 +1,19 @@
+{
+  "id": "1b31e2e6-1b18-4a70-9f74-0af6581f37bd",
+  "title": "324",
+  "slug": "324",
+  "created_at": "2025-11-29T08:27:46.574Z",
+  "updated_at": "2025-11-29T09:00:09.847Z",
+  "tags": [
+    "das"
+  ],
+  "version": "1.0.0",
+  "author": "User",
+  "model_config": {
+    "default_model": "gpt-4",
+    "temperature": 0.7,
+    "top_p": 1
+  },
+  "is_favorite": false,
+  "category": "132"
+}

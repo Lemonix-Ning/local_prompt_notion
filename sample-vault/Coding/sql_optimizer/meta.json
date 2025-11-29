@@ -1,0 +1,20 @@
+{
+  "id": "4c5c503a-2bc3-4ce2-b06b-64b20629174c",
+  "title": "SQL Query Optimizer",
+  "slug": "sql_optimizer",
+  "created_at": "2025-11-26T03:14:13.369Z",
+  "updated_at": "2025-11-29T07:42:40.845Z",
+  "tags": [
+    "sql",
+    "database",
+    "performance"
+  ],
+  "version": "1.0.0",
+  "author": "User",
+  "model_config": {
+    "default_model": "gpt-3.5-turbo",
+    "temperature": 0.2,
+    "top_p": 1
+  },
+  "is_favorite": true
+}

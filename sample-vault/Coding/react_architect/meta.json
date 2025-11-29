@@ -1,0 +1,20 @@
+{
+  "id": "7bc392be-904b-45a6-86b1-ecb97563e496",
+  "title": "React System Architect",
+  "slug": "react_architect",
+  "created_at": "2025-11-26T03:14:13.369Z",
+  "updated_at": "2025-11-26T03:14:13.369Z",
+  "tags": [
+    "react",
+    "architecture",
+    "expert"
+  ],
+  "version": "1.0.0",
+  "author": "User",
+  "model_config": {
+    "default_model": "gpt-4-turbo",
+    "temperature": 0.7,
+    "top_p": 1
+  },
+  "is_favorite": true
+}

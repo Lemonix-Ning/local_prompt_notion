@@ -1,0 +1,20 @@
+{
+  "id": "f920f48b-be7c-4217-87ee-8f563636ca7b",
+  "title": "eweter",
+  "slug": "eweter",
+  "created_at": "2025-11-29T09:00:28.308Z",
+  "updated_at": "2025-11-29T09:04:45.997Z",
+  "tags": [
+    "Coding",
+    "python"
+  ],
+  "version": "1.0.0",
+  "author": "User",
+  "model_config": {
+    "default_model": "gpt-4",
+    "temperature": 0.7,
+    "top_p": 1
+  },
+  "is_favorite": false,
+  "category": "Coding"
+}

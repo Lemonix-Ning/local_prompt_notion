@@ -1,0 +1,20 @@
+{
+  "id": "f8a4b524-5024-4cb2-b6c0-ac76c5a7b09e",
+  "title": "dasdas",
+  "slug": "dasdas",
+  "created_at": "2025-11-29T08:26:20.639Z",
+  "updated_at": "2025-11-29T09:04:51.690Z",
+  "tags": [
+    "Business",
+    "dasdas"
+  ],
+  "version": "1.0.0",
+  "author": "User",
+  "model_config": {
+    "default_model": "gpt-4",
+    "temperature": 0.7,
+    "top_p": 1
+  },
+  "is_favorite": false,
+  "category": "Business"
+}

@@ -1,0 +1,21 @@
+{
+  "id": "8b62a779-904b-4ad3-ace6-a7c9307a074a",
+  "title": "dasdas",
+  "slug": "dasdas",
+  "created_at": "2025-11-29T09:47:09.722Z",
+  "updated_at": "2026-01-10T14:52:20.241Z",
+  "tags": [
+    "dsa",
+    "python"
+  ],
+  "version": "1.0.0",
+  "author": "User",
+  "model_config": {
+    "default_model": "gpt-4",
+    "temperature": 0.7,
+    "top_p": 1
+  },
+  "is_favorite": false,
+  "category": "dsa",
+  "category_path": "D:\\workspace\\projects\\local_prompt_notion_complete\\local_prompt_notion\\sample-vault\\312\\dsa"
+}
