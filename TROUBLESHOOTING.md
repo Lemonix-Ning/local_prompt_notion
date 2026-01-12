@@ -11,6 +11,10 @@
 5. [Windows 文件重命名权限错误](#windows-文件重命名权限错误)
 6. [分类重命名失败 EPERM 错误](#分类重命名失败-eperm-错误)
 7. [前端数据未及时同步](#前端数据未及时同步)
+8. [主题系统问题](#主题系统问题)
+9. [标签颜色系统问题](#标签颜色系统问题)
+10. [新建页面 409 冲突错误](#新建页面-409-冲突错误)
+11. [树形下拉选择器问题](#树形下拉选择器问题)
 
 ---
 
@@ -511,6 +515,392 @@ T500   刷新完成
 
 ---
 
+## 主题系统问题
+
+### 问题描述
+主题切换后部分组件没有正确应用新主题样式，或者主题偏好没有保存。
+
+### 常见症状
+- 切换主题后某些区域仍显示旧主题颜色
+- 刷新页面后主题重置为默认值
+- 深色模式下背景特效（网格/极光）没有显示
+- 浅色模式下按钮样式不正确
+
+### 根本原因
+
+#### 1. CSS 变量未正确定义
+主题系统基于 CSS 变量，如果变量名不匹配会导致样式失效。
+
+#### 2. 组件未使用主题变量
+某些组件可能硬编码了颜色值而不是使用 CSS 变量。
+
+#### 3. localStorage 权限问题
+浏览器可能禁用了 localStorage，导致主题偏好无法保存。
+
+### 解决方案
+
+#### 检查 CSS 变量定义
+
+**文件**: `src/index.css`
+
+确保所有主题变量都正确定义：
+
+```css
+/* 浅色模式 (默认) */
+:root {
+  --bg-main: #ffffff;
+  --bg-secondary: #f8fafc;
+  --text-primary: #18181b;
+  --text-secondary: #64748b;
+  --border-color: #e2e8f0;
+  --card-bg: #ffffff;
+  --button-bg: #ffffff;
+  --button-border: #e2e8f0;
+  --button-hover: #f1f5f9;
+  --modal-bg: #ffffff;
+  --modal-overlay: rgba(0, 0, 0, 0.5);
+  --grid-opacity: 0;
+  --aurora-opacity: 0;
+}
+
+/* 深色模式覆盖 */
+:root.dark {
+  --bg-main: #09090b;
+  --bg-secondary: #18181b;
+  --text-primary: #e4e4e7;
+  --text-secondary: #a1a1aa;
+  --border-color: #27272a;
+  --card-bg: #18181b;
+  --button-bg: #18181b;
+  --button-border: #27272a;
+  --button-hover: #27272a;
+  --modal-bg: #000000;
+  --modal-overlay: rgba(0, 0, 0, 0.8);
+  --grid-opacity: 1;
+  --aurora-opacity: 1;
+}
+```
+
+#### 检查组件样式使用
+
+确保组件使用 CSS 变量而不是硬编码颜色：
+
+```tsx
+// ❌ 错误 - 硬编码颜色
+<div className="bg-white text-black">
+
+// ✅ 正确 - 使用主题变量
+<div className="bg-[var(--bg-main)] text-[var(--text-primary)]">
+
+// 或使用预定义的主题类
+<div className="bg-main text-primary">
+```
+
+#### 修复 localStorage 问题
+
+**文件**: `src/contexts/ThemeContext.tsx`
+
+添加 localStorage 错误处理：
+
+```typescript
+const [theme, setTheme] = useState<Theme>(() => {
+  try {
+    const saved = localStorage.getItem('theme');
+    return (saved as Theme) || 'light';
+  } catch (error) {
+    console.warn('无法读取主题设置，使用默认主题:', error);
+    return 'light';
+  }
+});
+
+useEffect(() => {
+  const root = document.documentElement;
+  root.classList.remove('dark', 'light');
+  root.classList.add(theme);
+  
+  try {
+    localStorage.setItem('theme', theme);
+  } catch (error) {
+    console.warn('无法保存主题设置:', error);
+  }
+}, [theme]);
+```
+
+### 验证步骤
+1. 切换主题，检查所有组件是否正确更新
+2. 刷新页面，确认主题偏好已保存
+3. 在深色模式下检查背景特效是否显示
+4. 在浅色模式下检查按钮样式是否正确
+
+---
+
+## 标签颜色系统问题
+
+### 问题描述
+标签颜色显示不正确、不一致，或者在不同主题下颜色不适配。
+
+### 常见症状
+- 相同标签在不同地方显示不同颜色
+- 标签颜色在主题切换后不适配
+- 某些标签显示默认灰色而不是彩色
+- 标签文字在某些颜色背景下不清晰
+
+### 根本原因
+
+#### 1. 哈希函数不一致
+标签名称的大小写、空格处理不一致导致哈希值不同。
+
+#### 2. 颜色盘不完整
+COLOR_PALETTE 数组可能被意外修改或不完整。
+
+#### 3. 无效标签处理
+空字符串或 null 标签没有正确处理。
+
+### 解决方案
+
+#### 检查标签名称标准化
+
+**文件**: `src/utils/tagColors.ts`
+
+确保哈希函数正确标准化输入：
+
+```typescript
+function hashString(str: string): number {
+  let hash = 5381;
+  // 关键：统一转换为小写并去除首尾空格
+  const normalizedStr = str.toLowerCase().trim();
+  
+  for (let i = 0; i < normalizedStr.length; i++) {
+    const char = normalizedStr.charCodeAt(i);
+    hash = ((hash << 5) + hash) + char;
+  }
+  
+  return Math.abs(hash);
+}
+```
+
+#### 验证颜色盘完整性
+
+检查 COLOR_PALETTE 是否包含所有 18 种颜色：
+
+```typescript
+// 应该有 18 个颜色对象
+console.log('颜色盘大小:', COLOR_PALETTE.length); // 应该输出 18
+
+// 检查颜色盘内容
+import { previewTagColors } from '@/utils/tagColors';
+console.table(previewTagColors());
+```
+
+#### 处理边界情况
+
+确保无效输入有合适的默认处理：
+
+```typescript
+export function getTagStyle(tag: string): string {
+  // 处理无效输入
+  if (!tag || typeof tag !== 'string' || tag.trim() === '') {
+    return 'bg-muted text-muted-foreground border-border';
+  }
+
+  const hash = hashString(tag);
+  const colorIndex = hash % COLOR_PALETTE.length;
+  const selectedColor = COLOR_PALETTE[colorIndex];
+  
+  return `${selectedColor.bg} ${selectedColor.text} ${selectedColor.border}`;
+}
+```
+
+#### 调试标签颜色
+
+在浏览器控制台中测试标签颜色：
+
+```javascript
+// 测试特定标签
+import { getTagStyle } from './src/utils/tagColors';
+console.log('Python 标签样式:', getTagStyle('Python'));
+console.log('python 标签样式:', getTagStyle('python')); // 应该相同
+
+// 预览所有颜色
+import { previewTagColors } from './src/utils/tagColors';
+previewTagColors().forEach(({ tag, style }) => {
+  console.log(`${tag}: ${style}`);
+});
+```
+
+### 验证步骤
+1. 创建多个相同名称的标签，确认颜色一致
+2. 测试大小写不同的标签名称（如 "Python" vs "python"）
+3. 在浅色和深色主题下检查标签可读性
+4. 测试空标签和特殊字符标签的处理
+
+---
+
+## 新建页面 409 冲突错误
+
+### 问题描述
+创建新提示词时出现 409 Conflict 错误，提示 slug 已存在。
+
+### 常见症状
+- 点击"创建"按钮后显示错误消息
+- 控制台显示 `POST /api/prompts 409 (Conflict)`
+- 错误信息提示 "Slug already exists"
+
+### 根本原因
+后端在生成 slug 时没有处理重复名称，当用户创建同名提示词时会产生冲突。
+
+### 解决方案
+
+**文件**: `server/utils/fileSystem.js`
+
+修改 `createPrompt` 函数，自动处理重复 slug：
+
+```javascript
+async function createPrompt(categoryPath, title) {
+  const baseSlug = title.toLowerCase()
+    .replace(/[^a-z0-9\s-]/g, '')
+    .replace(/\s+/g, '-')
+    .trim();
+
+  let slug = baseSlug;
+  let counter = 1;
+
+  // 检查 slug 是否已存在，如果存在则添加数字后缀
+  while (true) {
+    const promptPath = path.join(categoryPath, slug);
+    
+    if (!(await exists(promptPath))) {
+      break; // slug 可用
+    }
+    
+    // 生成新的 slug: original-name_1, original-name_2, ...
+    slug = `${baseSlug}_${counter}`;
+    counter++;
+    
+    // 防止无限循环
+    if (counter > 1000) {
+      throw new Error('无法生成唯一的 slug');
+    }
+  }
+
+  // 使用找到的唯一 slug 创建提示词
+  const promptPath = path.join(categoryPath, slug);
+  // ... 其余创建逻辑
+}
+```
+
+### 验证步骤
+1. 创建一个提示词，例如标题为 "Python 助手"
+2. 再次创建同样标题的提示词
+3. 第二个应该自动命名为 "python-助手_1"
+4. 继续创建应该依次为 "_2", "_3" 等
+
+---
+
+## 树形下拉选择器问题
+
+### 问题描述
+新建页面的分类选择下拉框显示异常或交互有问题。
+
+### 常见症状
+- 下拉框不显示层级结构
+- 搜索功能不工作
+- 选择分类后没有正确更新
+- 层级缩进显示错误
+
+### 根本原因
+
+#### 1. 分类数据结构问题
+`flatCategories` 函数可能没有正确处理嵌套分类。
+
+#### 2. 搜索过滤逻辑错误
+搜索时过滤条件可能过于严格或宽松。
+
+#### 3. 选择状态同步问题
+选择的分类没有正确更新到表单状态。
+
+### 解决方案
+
+#### 检查分类扁平化逻辑
+
+**文件**: `src/components/PromptList.tsx`
+
+确保 `flatCategories` 函数正确处理层级：
+
+```typescript
+const flatCategories = (categories: CategoryNode[], level = 0): Array<{path: string, name: string, level: number}> => {
+  let result: Array<{path: string, name: string, level: number}> = [];
+  
+  categories.forEach(category => {
+    // 添加当前分类
+    result.push({
+      path: category.path,
+      name: category.name,
+      level: level
+    });
+    
+    // 递归处理子分类
+    if (category.children && category.children.length > 0) {
+      const childCategories = flatCategories(category.children, level + 1);
+      result = result.concat(childCategories);
+    }
+  });
+  
+  return result;
+};
+```
+
+#### 修复搜索过滤
+
+确保搜索功能正确过滤分类：
+
+```typescript
+const filteredCategories = flatCategories(fileSystem?.categories || [])
+  .filter(cat => 
+    searchTerm === '' || 
+    cat.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    cat.path.toLowerCase().includes(searchTerm.toLowerCase())
+  );
+```
+
+#### 检查选择状态更新
+
+确保选择分类后正确更新表单：
+
+```typescript
+const handleCategorySelect = (categoryPath: string) => {
+  setSelectedCategory(categoryPath);
+  setIsDropdownOpen(false);
+  setSearchTerm(''); // 清空搜索
+};
+```
+
+#### 验证层级显示
+
+检查层级缩进是否正确：
+
+```tsx
+<div 
+  className="flex items-center px-3 py-2 hover:bg-accent cursor-pointer"
+  style={{ paddingLeft: `${12 + category.level * 20}px` }}
+>
+  {category.level > 0 && (
+    <span className="text-muted-foreground mr-2">└</span>
+  )}
+  <FolderOpen size={16} className="mr-2 text-muted-foreground" />
+  <span>{category.name}</span>
+</div>
+```
+
+### 验证步骤
+1. 打开新建页面，检查分类下拉框
+2. 验证层级缩进是否正确显示
+3. 测试搜索功能是否能找到嵌套分类
+4. 选择分类后检查是否正确更新表单
+5. 创建提示词后验证是否保存到正确分类
+
+---
+
 ## 通用排查步骤
 
 ### 问题诊断流程
@@ -557,8 +947,12 @@ npm run dev
 | 自动保存 | 误保存修改 | 5 分钟 | ⭐ 简单 |
 | EPERM 错误 | 重命名失败 | 2 小时 | ⭐⭐⭐ 困难 |
 | 数据不同步 | 界面未更新 | 30 分钟 | ⭐⭐ 中等 |
+| 主题系统 | 主题不生效 | 20 分钟 | ⭐⭐ 中等 |
+| 标签颜色 | 颜色不一致 | 15 分钟 | ⭐ 简单 |
+| 409 冲突 | 创建失败 | 30 分钟 | ⭐⭐ 中等 |
+| 下拉选择器 | 交互异常 | 25 分钟 | ⭐⭐ 中等 |
 
 ---
 
-**最后更新**: 2025 年 11 月 29 日  
+**最后更新**: 2025 年 1 月 12 日  
 **遇到新问题?** 请提交 Issue 或 Pull Request

@@ -1,0 +1,39 @@
+{
+  "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
+  "productName": "PromptManager",
+  "version": "1.0.0",
+  "identifier": "com.promptmanager.desktop",
+  "build": {
+    "frontendDist": "../dist",
+    "devUrl": "http://localhost:3002",
+    "beforeDevCommand": "npm run dev:client",
+    "beforeBuildCommand": "npm run build"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "PromptManager - 提示词管理器",
+        "width": 1200,
+        "height": 800,
+        "resizable": true,
+        "fullscreen": false
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "externalBin": [
+      "binaries/server"
+    ],
+    "resources": [
+      "../sample-vault"
+    ],
+    "icon": [
+      "icons/icon.ico"
+    ]
+  }
+}

@@ -1,10 +1,125 @@
 /**
- * 全局样式
+ * 全局样式 - 新主题系统
  */
 
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/* --- 浅色模式 (默认) --- */
+:root {
+  /* --- 基础背景与文字 --- */
+  --bg-main: #ffffff;           /* 主背景：纯白 */
+  --bg-sidebar: #f9fafb;        /* 侧边栏：极淡的灰 (Gray 50) */
+  --text-primary: #18181b;      /* 主要文字：接近纯黑 (Zinc 900) */
+  --text-secondary: #52525b;    /* 次要文字：深灰 (Zinc 600) */
+  --text-muted: #a1a1aa;        /* 弱化文字：浅灰 (Zinc 400) */
+  --border-color: #e4e4e7;      /* 边框颜色：淡灰 (Gray 200) */
+  
+  /* --- 交互状态 (列表项) --- */
+  --item-hover: #f3f4f6;        /* 悬停背景：Gray 100 */
+  --item-active-bg: #e0e7ff;    /* 选中背景：Indigo 50 (淡蓝紫色) */
+  --item-active-text: #4f46e5;  /* 选中文字：Indigo 600 (深蓝紫色) */
+  
+  /* --- 卡片 (Card) --- */
+  --card-bg: #ffffff;           /* 卡片背景：纯白 */
+  --card-border: #e4e4e7;       /* 卡片边框：同通用边框 */
+  --spotlight-color: rgba(0,0,0,0.02); /* 聚光灯效果：极淡的黑色阴影 */
+
+  /* --- 按钮 (Button) - 专门优化的白底风格 --- */
+  --btn-bg: #ffffff;            /* 按钮背景：白 */
+  --btn-text: #18181b;          /* 按钮文字：黑 */
+  --btn-border: #e4e4e7;        /* 按钮边框：灰描边 */
+  --btn-hover: #f4f4f5;         /* 按钮悬停：淡灰 */
+  
+  /* --- 主要按钮 (浅色模式) --- */
+  --btn-primary-bg: #6366f1;    /* 主按钮背景：蓝色 */
+  --btn-primary-text: #ffffff;  /* 主按钮文字：白色 */
+  --btn-primary-hover: #5855eb; /* 主按钮悬停：深蓝 */
+  
+  /* --- 特效控制 --- */
+  --grid-opacity: 0;            /* 网格背景：隐藏 */
+  --aurora-opacity: 0;          /* 极光背景：隐藏 */
+
+  /* --- 兼容现有 Tailwind 变量 --- */
+  --background: var(--bg-main);
+  --foreground: var(--text-primary);
+  --muted: #f1f5f9;
+  --muted-foreground: var(--text-muted);
+  --popover: var(--card-bg);
+  --popover-foreground: var(--text-primary);
+  --card: var(--card-bg);
+  --card-foreground: var(--text-primary);
+  --border: var(--border-color);
+  --input: #f1f5f9;
+  --primary: #6366f1;
+  --primary-foreground: #ffffff;
+  --secondary: #f1f5f9;
+  --secondary-foreground: var(--text-primary);
+  --accent: var(--item-hover);
+  --accent-foreground: var(--text-primary);
+  --destructive: #ef4444;
+  --destructive-foreground: #ffffff;
+  --ring: #6366f1;
+  --radius: 0.5rem;
+}
+
+/* --- 深色模式覆盖 --- */
+:root.dark {
+  /* --- 基础背景与文字 --- */
+  --bg-main: #09090b;           /* 主背景：接近纯黑 */
+  --bg-sidebar: #18181b;        /* 侧边栏：深灰 */
+  --text-primary: #e4e4e7;      /* 主要文字：浅灰 */
+  --text-secondary: #a1a1aa;    /* 次要文字：中灰 */
+  --text-muted: #71717a;        /* 弱化文字：深灰 */
+  --border-color: rgba(255, 255, 255, 0.1); /* 边框：半透明白 */
+  
+  /* --- 交互状态 --- */
+  --item-hover: #27272a;        /* 悬停背景：深灰 */
+  --item-active-bg: #312e81;    /* 选中背景：深蓝紫 */
+  --item-active-text: #a5b4fc;  /* 选中文字：浅蓝紫 */
+  
+  /* --- 卡片 --- */
+  --card-bg: #18181b;           /* 卡片背景：深灰 */
+  --card-border: rgba(255, 255, 255, 0.1); /* 卡片边框 */
+  --spotlight-color: rgba(255,255,255,0.06); /* 聚光灯效果 */
+
+  /* --- 按钮 (深色模式保持高对比) --- */
+  --btn-bg: #ffffff;            /* 按钮背景：白 */
+  --btn-text: #000000;          /* 按钮文字：黑 */
+  --btn-border: transparent;    /* 按钮边框：无 */
+  --btn-hover: #f4f4f5;         /* 按钮悬停：淡灰 */
+  
+  /* --- 主要按钮 (深色模式) --- */
+  --btn-primary-bg: #18181b;    /* 主按钮背景：深色 */
+  --btn-primary-text: #ffffff;  /* 主按钮文字：白色 */
+  --btn-primary-hover: #27272a; /* 主按钮悬停：稍浅 */
+  
+  /* --- 特效控制 --- */
+  --grid-opacity: 1;            /* 网格背景：显示 */
+  --aurora-opacity: 1;          /* 极光背景：显示 */
+
+  /* --- 兼容现有 Tailwind 变量 --- */
+  --background: var(--bg-main);
+  --foreground: var(--text-primary);
+  --muted: #27272a;
+  --muted-foreground: var(--text-muted);
+  --popover: var(--card-bg);
+  --popover-foreground: var(--text-primary);
+  --card: var(--card-bg);
+  --card-foreground: var(--text-primary);
+  --border: var(--border-color);
+  --input: #27272a;
+  --primary: #6366f1;
+  --primary-foreground: #fafafa;
+  --secondary: #27272a;
+  --secondary-foreground: #fafafa;
+  --accent: var(--item-hover);
+  --accent-foreground: var(--text-primary);
+  --destructive: #ef4444;
+  --destructive-foreground: #fafafa;
+  --ring: #6366f1;
+}
 
 * {
   margin: 0;
@@ -13,24 +128,21 @@
   -webkit-tap-highlight-color: transparent;
 }
 
-:root {
-  color-scheme: dark;
-}
-
 html,
 body,
 #root {
-  background-color: #09090b;
+  background-color: var(--background);
+  color: var(--foreground);
 }
 
 select {
-  color-scheme: dark;
+  color-scheme: inherit;
 }
 
 select,
 option {
-  background-color: #0b0b0f;
-  color: #e4e4e7;
+  background-color: var(--popover);
+  color: var(--popover-foreground);
 }
 
 body {
@@ -39,8 +151,9 @@ body {
     sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  background-color: #09090b;
-  color: #e4e4e7;
+  background-color: var(--bg-main);
+  color: var(--text-primary);
+  transition: background-color 0.3s ease, color 0.3s ease;
 }
 
 code {
@@ -48,33 +161,106 @@ code {
     monospace;
 }
 
-/* 自定义滚动条 */
+/* --- 主题感知的实用类 --- */
+.theme-active { 
+  background-color: var(--item-active-bg); 
+  color: var(--item-active-text); 
+}
+
+.theme-hover:hover { 
+  background-color: var(--item-hover); 
+  color: var(--text-primary); 
+}
+
+.theme-button {
+  background-color: var(--btn-bg);
+  color: var(--btn-text);
+  border: 1px solid var(--btn-border);
+}
+
+.theme-button:hover {
+  background-color: var(--btn-hover);
+}
+
+.theme-button-primary {
+  background-color: var(--btn-primary-bg);
+  color: var(--btn-primary-text);
+  border: 1px solid transparent;
+}
+
+.theme-button-primary:hover {
+  background-color: var(--btn-primary-hover);
+}
+
+/* --- 自定义滚动条 --- */
 ::-webkit-scrollbar {
   width: 8px;
   height: 8px;
 }
 
 ::-webkit-scrollbar-track {
-  background: rgba(255, 255, 255, 0.04);
+  background: rgba(0, 0, 0, 0.04);
 }
 
 ::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.14);
+  background: rgba(0, 0, 0, 0.14);
   border-radius: 4px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 0, 0, 0.22);
+}
+
+/* 深色模式滚动条 */
+:root.dark ::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+:root.dark ::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.14);
+}
+
+:root.dark ::-webkit-scrollbar-thumb:hover {
   background: rgba(255, 255, 255, 0.22);
 }
 
+/* --- 网格背景 --- */
 .bg-grid {
   background-size: 40px 40px;
-  background-image: linear-gradient(to right, rgba(255, 255, 255, 0.03) 1px, transparent 1px),
-                    linear-gradient(to bottom, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
   mask-image: linear-gradient(to bottom, black 40%, transparent 100%);
 }
 
+/* 默认浅色模式网格 - 隐藏 */
+.bg-grid {
+  opacity: 0;
+  background-image: 
+    linear-gradient(to right, rgba(0, 0, 0, 0.03) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(0, 0, 0, 0.03) 1px, transparent 1px);
+}
+
+/* 深色模式网格 - 显示 */
+:root.dark .bg-grid {
+  opacity: 0.2;
+  background-image: 
+    linear-gradient(to right, rgba(255, 255, 255, 0.03) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+}
+
+/* --- 极光背景 --- */
 .aurora-bg {
+  background:
+    radial-gradient(circle at 15% 50%, rgba(79, 70, 229, 0.04) 0%, transparent 40%),
+    radial-gradient(circle at 85% 30%, rgba(236, 72, 153, 0.04) 0%, transparent 40%);
+}
+
+/* 默认浅色模式极光 - 隐藏 */
+.aurora-bg {
+  opacity: 0;
+}
+
+/* 深色模式极光 - 显示 */
+:root.dark .aurora-bg {
+  opacity: 1;
   background:
     radial-gradient(circle at 15% 50%, rgba(79, 70, 229, 0.08) 0%, transparent 40%),
     radial-gradient(circle at 85% 30%, rgba(236, 72, 153, 0.08) 0%, transparent 40%);
@@ -106,7 +292,7 @@ code {
 
 /* Markdown 内容样式 */
 .prose {
-  color: #374151;
+  color: var(--foreground);
   max-width: 65ch;
 }
 
@@ -150,14 +336,14 @@ code {
 }
 
 .prose code {
-  background-color: #f3f4f6;
+  background-color: var(--muted);
   padding: 0.2em 0.4em;
   border-radius: 0.25em;
   font-size: 0.875em;
 }
 
 .prose pre {
-  background-color: #f9fafb;
+  background-color: var(--muted);
   padding: 1em;
   border-radius: 0.5em;
   overflow-x: auto;
@@ -171,19 +357,19 @@ code {
 }
 
 .prose blockquote {
-  border-left: 4px solid #e5e7eb;
+  border-left: 4px solid var(--border);
   padding-left: 1em;
   margin-left: 0;
   margin-right: 0;
   font-style: italic;
-  color: #6b7280;
+  color: var(--muted-foreground);
 }
 
 .prose a {
-  color: #2563eb;
+  color: var(--primary);
   text-decoration: underline;
 }
 
 .prose a:hover {
-  color: #1d4ed8;
+  opacity: 0.8;
 }

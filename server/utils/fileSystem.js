@@ -184,12 +184,16 @@ async function writePrompt(promptPath, data) {
  * 创建新提示词
  */
 async function createPrompt(categoryPath, promptData) {
-  const slug = titleToSlug(promptData.title);
-  const promptPath = path.join(categoryPath, slug);
+  const baseSlug = titleToSlug(promptData.title);
+  let slug = baseSlug;
+  let promptPath = path.join(categoryPath, slug);
+  let counter = 1;
 
-  // 检查是否已存在
-  if (await exists(promptPath)) {
-    throw new Error(`Prompt with slug "${slug}" already exists`);
+  // 如果已存在，自动添加数字后缀
+  while (await exists(promptPath)) {
+    slug = `${baseSlug}_${counter}`;
+    promptPath = path.join(categoryPath, slug);
+    counter++;
   }
 
   // 从路径中提取分类名称

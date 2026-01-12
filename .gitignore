@@ -10,8 +10,14 @@ coverage/
 dist/
 build/
 
-# Misc
-.DS_Store
+# Tauri
+src-tauri/target/
+src-tauri/binaries/
+src-tauri/gen/
+.pkg-cache/
+
+# Environment
+.env
 .env.local
 .env.development.local
 .env.test.local
@@ -32,4 +38,13 @@ lerna-debug.log*
 *~
 
 # OS
+.DS_Store
 Thumbs.db
+
+# Runtime files
+sample-vault/trash/.trash-visits.json
+sample-vault/.config/
+
+# Temporary files
+PROJECT_COMPLETION_SUMMARY.md
+qs.md
