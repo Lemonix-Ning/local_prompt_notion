@@ -48,6 +48,11 @@
   --muted-foreground: var(--text-muted);
   --popover: var(--card-bg);
   --popover-foreground: var(--text-primary);
+
+  /* --- Toast 通知系统样式 --- */
+  --toast-bg: #ffffff;
+  --toast-border: #e4e4e7;
+  --toast-text: #18181b;
   --card: var(--card-bg);
   --card-foreground: var(--text-primary);
   --border: var(--border-color);
@@ -98,6 +103,11 @@
   /* --- 特效控制 --- */
   --grid-opacity: 1;            /* 网格背景：显示 */
   --aurora-opacity: 1;          /* 极光背景：显示 */
+
+  /* --- Toast 通知系统样式 (深色模式) --- */
+  --toast-bg: rgba(24, 24, 27, 0.8); /* 半透明黑 */
+  --toast-border: rgba(255, 255, 255, 0.1);
+  --toast-text: #e4e4e7;
 
   /* --- 兼容现有 Tailwind 变量 --- */
   --background: var(--bg-main);
@@ -372,4 +382,33 @@ code {
 
 .prose a:hover {
   opacity: 0.8;
+}
+/* --- Toast 通知系统动画 --- */
+@keyframes slideIn {
+  from {
+    opacity: 0;
+    transform: translateX(100%);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes shrink {
+  from {
+    width: 100%;
+  }
+  to {
+    width: 0%;
+  }
+}
+
+.toast-enter {
+  animation: slideIn 0.3s ease-out;
+}
+
+/* Toast 进度条动画 */
+.animate-shrink {
+  animation: shrink 3s linear forwards;
 }

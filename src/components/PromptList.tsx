@@ -5,37 +5,42 @@
 
 import {
   Plus,
-  Search,
   Copy,
   Star,
   Trash2,
-  Menu,
-  MoreHorizontal,
   X,
   RotateCcw,
+  Search,
+  Minus,
+  Square,
+  Maximize2,
+  PanelLeftClose,
+  PanelLeftOpen,
 } from 'lucide-react';
 import { useApp } from '../AppContext';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { EditorPage } from './EditorPage';
+// EditorPage 现在通过 EditorOverlay 系统使用，不再直接导入
 import api from '../api/client';
 import { getSmartGradient, getSmartIcon } from '../utils/smartIcon';
 import { getTagStyle } from '../utils/tagColors';
+import { useToast } from '../contexts/ToastContext';
+import { useConfirm } from '../contexts/ConfirmContext';
 
 function SpotlightCard({
   children,
   className,
-  onDoubleClick,
+  onClick,
 }: {
   children: ReactNode;
   className?: string;
-  onDoubleClick?: () => void;
+  onClick?: () => void;
 }) {
   const [position, setPosition] = useState({ x: 0, y: 0 });
   const [opacity, setOpacity] = useState(0);
 
   return (
     <div
-      onDoubleClick={onDoubleClick}
+      onClick={onClick}
       onMouseMove={(e) => {
         const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
         setPosition({ x: e.clientX - rect.left, y: e.clientY - rect.top });
@@ -71,8 +76,9 @@ const getTagColor = (tag: string) => {
 
 export function PromptList() {
   const { state, dispatch, getFilteredPrompts, createPrompt, savePrompt, deletePrompt, restorePrompt } = useApp();
-  const { searchQuery, selectedCategory } = state;
-  const [isModalOpen, setIsModalOpen] = useState(false);
+  const { searchQuery, selectedCategory, uiState } = state;
+  const { showToast } = useToast();
+  const { confirm } = useConfirm();
   const [isSwitchingList, setIsSwitchingList] = useState(false);
   const [isCategoryOpen, setIsCategoryOpen] = useState(false);
   const [categoryQuery, setCategoryQuery] = useState('');
@@ -83,12 +89,18 @@ export function PromptList() {
     category: '', 
     tags: '' 
   });
-  const [toast, setToast] = useState<string | null>(null);
-  const [editingPromptId, setEditingPromptId] = useState<string | null>(null);
+  // 现在使用 EditorOverlay 系统，不再需要本地编辑状态
+  // const [editingPromptId, setEditingPromptId] = useState<string | null>(null);
   const [trashCounts, setTrashCounts] = useState<Record<string, number>>({});
   const trashThreshold = 10;
 
+  // 窗口控制状态
+  const [isMaximized, setIsMaximized] = useState(false);
+  const [isSearchFocused, setIsSearchFocused] = useState(false);
+
   const prompts = getFilteredPrompts();
+  const isModalOpen = uiState.newPromptModal.isOpen;
+  const preselectedCategory = uiState.newPromptModal.preselectedCategory;
 
   useEffect(() => {
     if (!isModalOpen) {
@@ -96,6 +108,30 @@ export function PromptList() {
       setCategoryQuery('');
     }
   }, [isModalOpen]);
+
+  // 处理预选分类
+  useEffect(() => {
+    if (isModalOpen && preselectedCategory) {
+      // 根据分类路径找到分类名称
+      const findCategoryNameByPath = (nodes: any[], path: string): string | null => {
+        for (const node of nodes) {
+          if (node.path === path) return node.name;
+          if (node.children && node.children.length > 0) {
+            const found = findCategoryNameByPath(node.children, path);
+            if (found) return found;
+          }
+        }
+        return null;
+      };
+      
+      if (state.fileSystem?.categories) {
+        const categoryName = findCategoryNameByPath(state.fileSystem.categories, preselectedCategory);
+        if (categoryName) {
+          setNewPrompt(prev => ({ ...prev, category: categoryName }));
+        }
+      }
+    }
+  }, [isModalOpen, preselectedCategory, state.fileSystem]);
 
   useEffect(() => {
     if (!isCategoryOpen) return;
@@ -150,6 +186,104 @@ export function PromptList() {
       cancelled = true;
     };
   }, [selectedCategory, state.fileSystem?.root]);
+
+  // 窗口控制函数
+  useEffect(() => {
+    // 监听窗口状态变化
+    const checkMaximized = async () => {
+      try {
+        const { getCurrentWindow } = await import('@tauri-apps/api/window');
+        const appWindow = getCurrentWindow();
+        const maximized = await appWindow.isMaximized();
+        setIsMaximized(maximized);
+      } catch (error) {
+        // 忽略错误，可能不在Tauri环境中
+      }
+    };
+
+    checkMaximized();
+
+    // 监听窗口状态变化事件
+    let unlisten: (() => void) | undefined;
+    
+    const setupListener = async () => {
+      try {
+        const { getCurrentWindow } = await import('@tauri-apps/api/window');
+        const appWindow = getCurrentWindow();
+        
+        unlisten = await appWindow.onResized(() => {
+          checkMaximized();
+        });
+      } catch (error) {
+        // 忽略错误
+      }
+    };
+
+    setupListener();
+
+    return () => {
+      if (unlisten) {
+        unlisten();
+      }
+    };
+  }, []);
+
+  const handleMinimize = async () => {
+    try {
+      const { getCurrentWindow } = await import('@tauri-apps/api/window');
+      const appWindow = getCurrentWindow();
+      await appWindow.minimize();
+    } catch (error) {
+      console.error('Failed to minimize window:', error);
+      showToast('最小化失败: ' + (error instanceof Error ? error.message : String(error)), 'error');
+    }
+  };
+
+  const handleMaximize = async () => {
+    try {
+      const { getCurrentWindow } = await import('@tauri-apps/api/window');
+      const appWindow = getCurrentWindow();
+      if (isMaximized) {
+        await appWindow.unmaximize();
+      } else {
+        await appWindow.maximize();
+      }
+    } catch (error) {
+      console.error('Failed to toggle maximize:', error);
+      showToast('窗口最大化失败: ' + (error instanceof Error ? error.message : String(error)), 'error');
+    }
+  };
+
+  const handleDragStart = async (e: React.MouseEvent) => {
+    const target = e.target as HTMLElement;
+    if (
+      target.closest('button') ||
+      target.closest('input') ||
+      target.closest('textarea') ||
+      target.closest('select')
+    ) {
+      return;
+    }
+
+    try {
+      const { getCurrentWindow } = await import('@tauri-apps/api/window');
+      const appWindow = getCurrentWindow();
+      await appWindow.startDragging();
+    } catch (error) {
+      console.error('Failed to start dragging window:', error);
+    }
+  };
+
+  const handleClose = async () => {
+    try {
+      const { getCurrentWindow } = await import('@tauri-apps/api/window');
+      const appWindow = getCurrentWindow();
+      await appWindow.close();
+    } catch (error) {
+      console.error('Failed to close window:', error);
+      showToast('关闭窗口失败: ' + (error instanceof Error ? error.message : String(error)), 'error');
+    }
+  };
 
   const getTrashItemName = (promptPath: string): string | null => {
     const unixIdx = promptPath.lastIndexOf('/trash/');
@@ -209,20 +343,19 @@ export function PromptList() {
     ? allFlatCategories.filter((c) => c.name.toLowerCase().includes(categoryQuery.toLowerCase()))
     : allFlatCategories;
 
-  // 双击进入编辑页面
-  const handleDoubleClick = (promptId: string) => {
-    setEditingPromptId(promptId);
-  };
-
-  const showToast = (message: string) => {
-    setToast(message);
-    setTimeout(() => setToast(null), 2000);
+  // 单击进入编辑页面 - 使用动画覆盖层
+  const handleCardClick = (promptId: string) => {
+    const originCardId = `prompt-card-${promptId}`;
+    dispatch({ 
+      type: 'OPEN_EDITOR_OVERLAY', 
+      payload: { promptId, originCardId } 
+    });
   };
 
   const handleCopy = (text: string) => {
     navigator.clipboard.writeText(text)
-      .then(() => showToast("已复制到剪贴板"))
-      .catch(() => showToast("复制失败"));
+      .then(() => showToast("已复制到剪贴板", 'success'))
+      .catch(() => showToast("复制失败", 'error'));
   };
 
   const toggleFavorite = async (promptId: string) => {
@@ -237,7 +370,7 @@ export function PromptList() {
     try {
       await savePrompt(updated);
     } catch (error) {
-      showToast("更新失败");
+      showToast("更新失败", 'error');
     }
   };
 
@@ -246,22 +379,38 @@ export function PromptList() {
     
     if (isInTrash) {
       // 在回收站中,永久删除
-      if (window.confirm('确定要永久删除这个提示词吗？此操作无法撤销！')) {
+      const confirmed = await confirm({
+        title: '永久删除提示词',
+        message: '确定要永久删除这个提示词吗？此操作无法撤销！',
+        confirmText: '永久删除',
+        cancelText: '取消',
+        type: 'danger'
+      });
+      
+      if (confirmed) {
         try {
           await deletePrompt(promptId, true); // permanent = true
-          showToast("已永久删除");
+          showToast("已永久删除", 'success');
         } catch (error) {
-          showToast("删除失败");
+          showToast("删除失败", 'error');
         }
       }
     } else {
       // 不在回收站,移动到回收站
-      if (window.confirm('确定要删除这个提示词吗？')) {
+      const confirmed = await confirm({
+        title: '删除提示词',
+        message: '确定要删除这个提示词吗？',
+        confirmText: '删除',
+        cancelText: '取消',
+        type: 'warning'
+      });
+      
+      if (confirmed) {
         try {
           await deletePrompt(promptId, false);
-          showToast("已移动到回收站");
+          showToast("已移动到回收站", 'success');
         } catch (error) {
-          showToast("删除失败");
+          showToast("删除失败", 'error');
         }
       }
     }
@@ -270,15 +419,15 @@ export function PromptList() {
   const handleRestore = async (promptId: string) => {
     try {
       await restorePrompt(promptId);
-      showToast("已恢复");
+      showToast("已恢复", 'success');
     } catch (error) {
-      showToast("恢复失败");
+      showToast("恢复失败", 'error');
     }
   };
 
   const handleAddPrompt = async () => {
     if (!newPrompt.title || !newPrompt.content || !newPrompt.category) {
-      showToast("请填写标题、分类和内容");
+      showToast("请填写标题、分类和内容", 'warning');
       return;
     }
 
@@ -301,7 +450,7 @@ export function PromptList() {
       }
       
       if (!categoryPath) {
-        showToast("找不到指定的分类");
+        showToast("找不到指定的分类", 'error');
         return;
       }
 
@@ -325,55 +474,100 @@ export function PromptList() {
       await savePrompt(updated);
       
       setNewPrompt({ title: '', content: '', category: '', tags: '' });
-      setIsModalOpen(false);
-      showToast("已创建新提示词");
+      dispatch({ type: 'CLOSE_NEW_PROMPT_MODAL' });
+      showToast("已创建新提示词", 'success');
     } catch (error) {
-      showToast('创建失败: ' + (error as Error).message);
+      showToast('创建失败: ' + (error as Error).message, 'error');
     }
   };
 
-  // 如果正在编辑某个提示词，显示编辑页面
-  if (editingPromptId) {
-    return <EditorPage promptId={editingPromptId} onClose={() => setEditingPromptId(null)} />;
-  }
+  // 现在使用全局 EditorOverlay 系统，不再需要本地编辑页面渲染
+  // if (editingPromptId) {
+  //   return <EditorPage promptId={editingPromptId} onClose={() => setEditingPromptId(null)} />;
+  // }
 
   return (
     <div className="flex-1 flex flex-col h-full overflow-hidden relative bg-transparent">
-      {/* Toast Notification */}
-      {toast && (
-        <div className="fixed bottom-6 right-6 bg-popover/95 text-foreground px-4 py-2 rounded-lg shadow-xl z-[9999] text-sm border border-border backdrop-blur">
-          {toast}
-        </div>
-      )}
-
       {/* Top Navigation Bar */}
-      <div className="h-16 flex items-center justify-between px-6 border-b border-border flex-shrink-0 bg-background/50 backdrop-blur-md z-10 sticky top-0">
-        <div className="flex items-center gap-3">
+      <div 
+        className="h-16 flex items-center justify-between px-6 border-b border-border flex-shrink-0 bg-background/50 backdrop-blur-md z-10 sticky top-0"
+        data-tauri-drag-region="true"
+        onMouseDown={handleDragStart}
+      >
+        {/* 左侧：侧边栏切换按钮 */}
+        <div className="flex items-center">
           <button 
             onClick={() => dispatch({ type: 'TOGGLE_SIDEBAR' })}
+            data-tauri-drag-region={false}
             className="p-2 hover:bg-accent rounded-lg text-muted-foreground hover:text-foreground transition-colors"
           >
-            {state.uiState.sidebarOpen ? <X size={18} /> : <Menu size={18} />}
+            {uiState.sidebarOpen ? <PanelLeftClose size={18} /> : <PanelLeftOpen size={18} />}
           </button>
-          <div className="text-sm text-muted-foreground flex items-center gap-2">
-            <span className="hover:text-foreground cursor-pointer transition-colors">Workspace</span>
-            <span className="text-border">/</span>
-            <span className="text-foreground font-medium">提示词库</span>
-          </div>
         </div>
-        <div className="flex items-center gap-2">
-          <div className="relative">
-            <Search size={14} className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground" />
-            <input 
-              type="text" 
-              placeholder="Search..." 
-              className="pl-9 pr-3 py-2 text-sm border border-border rounded-lg w-60 focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20 transition-all placeholder:text-muted-foreground bg-input text-foreground"
+
+        {/* 中间：搜索框 */}
+        <div className="flex-1 max-w-lg mx-8">
+          <div className={`
+            relative flex items-center rounded-lg transition-all duration-200
+            ${isSearchFocused 
+              ? 'bg-accent ring-2 ring-primary/50' 
+              : 'bg-input hover:bg-accent'
+            }
+          `}>
+            <Search 
+              size={16} 
+              className="ml-3 text-muted-foreground transition-colors" 
+            />
+            <input
+              type="text"
+              placeholder="搜索提示词..."
               value={searchQuery}
               onChange={(e) => dispatch({ type: 'SET_SEARCH', payload: e.target.value })}
+              onFocus={() => setIsSearchFocused(true)}
+              onBlur={() => setIsSearchFocused(false)}
+              data-tauri-drag-region={false}
+              className="flex-1 px-3 py-2 bg-transparent outline-none text-sm text-foreground placeholder:text-muted-foreground"
             />
+            {searchQuery && (
+              <button
+                onClick={() => dispatch({ type: 'SET_SEARCH', payload: '' })}
+                data-tauri-drag-region={false}
+                className="mr-2 p-2 hover:bg-accent rounded-lg text-muted-foreground hover:text-foreground transition-colors"
+                title="清除搜索"
+              >
+                <X size={18} />
+              </button>
+            )}
           </div>
-          <button className="p-2 hover:bg-accent rounded-lg text-muted-foreground hover:text-foreground">
-            <MoreHorizontal size={18} />
+        </div>
+
+        {/* 右侧：窗口控制按钮 */}
+        <div className="flex items-center gap-1 flex-shrink-0">
+          <button
+            onClick={handleMinimize}
+            data-tauri-drag-region={false}
+            className="p-2 rounded-lg transition-colors hover:bg-accent text-muted-foreground hover:text-foreground"
+            title="最小化"
+          >
+            <Minus size={16} />
+          </button>
+          
+          <button
+            onClick={handleMaximize}
+            data-tauri-drag-region={false}
+            className="p-2 rounded-lg transition-colors hover:bg-accent text-muted-foreground hover:text-foreground"
+            title={isMaximized ? "还原" : "最大化"}
+          >
+            {isMaximized ? <Maximize2 size={14} /> : <Square size={14} />}
+          </button>
+          
+          <button
+            onClick={handleClose}
+            data-tauri-drag-region={false}
+            className="p-2 rounded-lg transition-colors hover:bg-red-500 hover:text-white text-muted-foreground"
+            title="关闭"
+          >
+            <X size={16} />
           </button>
         </div>
       </div>
@@ -391,7 +585,7 @@ export function PromptList() {
               <span className="font-medium text-foreground">{prompts.length}</span> 个项目
             </div>
             <button 
-              onClick={() => setIsModalOpen(true)}
+              onClick={() => dispatch({ type: 'OPEN_NEW_PROMPT_MODAL' })}
               className="theme-button-primary px-3 py-2 rounded-lg text-sm font-medium flex items-center gap-1.5 transition-colors shadow-sm"
             >
               <Plus size={16} /> 新建
@@ -408,9 +602,15 @@ export function PromptList() {
               return (
               <SpotlightCard
                 key={prompt.meta.id}
-                onDoubleClick={() => !isInTrash && handleDoubleClick(prompt.meta.id)}
+                onClick={() => {
+                  if (!isInTrash) {
+                    handleCardClick(prompt.meta.id);
+                  }
+                }}
                 className={`p-5 flex flex-col h-64 ${isInTrash ? 'cursor-default opacity-75' : 'cursor-pointer'}`}
               >
+                {/* 为动画系统添加唯一ID */}
+                <div id={`prompt-card-${prompt.meta.id}`} className="w-full h-full flex flex-col">
                 {/* Card Header */}
                 <div className="flex justify-between items-start mb-3">
                   <div className="flex-1 pr-4 min-w-0">
@@ -497,6 +697,7 @@ export function PromptList() {
                     )}
                   </div>
                 </div>
+                </div>
               </SpotlightCard>
             )})}
           </div>
@@ -535,7 +736,7 @@ export function PromptList() {
                 <h2 className="text-lg font-semibold text-foreground">新建页面</h2>
               </div>
               <button 
-                onClick={() => setIsModalOpen(false)} 
+                onClick={() => dispatch({ type: 'CLOSE_NEW_PROMPT_MODAL' })} 
                 className="text-muted-foreground hover:text-foreground p-2 rounded-lg hover:bg-accent transition-colors"
               >
                 <X size={20} />
@@ -716,7 +917,7 @@ export function PromptList() {
                 
                 <div className="flex items-center gap-3">
                   <button 
-                    onClick={() => setIsModalOpen(false)}
+                    onClick={() => dispatch({ type: 'CLOSE_NEW_PROMPT_MODAL' })}
                     className="px-4 py-2 text-sm text-muted-foreground hover:bg-accent rounded-lg transition-colors"
                   >
                     取消

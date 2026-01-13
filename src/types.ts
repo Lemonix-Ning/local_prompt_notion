@@ -87,6 +87,15 @@ export interface UIState {
   sidebarOpen: boolean;
   editorMode: 'edit' | 'preview' | 'split';
   isLoading: boolean;
+  newPromptModal: {
+    isOpen: boolean;
+    preselectedCategory?: string;
+  };
+  editorOverlay: {
+    isOpen: boolean;
+    promptId?: string;
+    originCardId?: string;
+  };
 }
 
 /**
@@ -121,7 +130,11 @@ export type AppAction =
   | { type: 'SET_EDITOR_MODE'; payload: 'edit' | 'preview' | 'split' }
   | { type: 'SET_EDITING'; payload: boolean }
   | { type: 'SET_LOADING'; payload: boolean }
-  | { type: 'UPDATE_SETTINGS'; payload: Partial<AppSettings> };
+  | { type: 'UPDATE_SETTINGS'; payload: Partial<AppSettings> }
+  | { type: 'OPEN_NEW_PROMPT_MODAL'; payload?: string }
+  | { type: 'CLOSE_NEW_PROMPT_MODAL' }
+  | { type: 'OPEN_EDITOR_OVERLAY'; payload: { promptId: string; originCardId: string } }
+  | { type: 'CLOSE_EDITOR_OVERLAY' };
 
 /**
  * 文件系统适配器接口

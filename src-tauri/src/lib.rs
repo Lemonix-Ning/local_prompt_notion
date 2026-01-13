@@ -1,6 +1,6 @@
-use std::sync::Mutex;
 use std::fs;
 use std::path::Path;
+use std::sync::Mutex;
 
 use tauri::Manager;
 use tauri_plugin_shell::process::CommandChild;
@@ -26,13 +26,23 @@ fn ensure_vault_data(vault_path: &Path, app: &tauri::AppHandle) -> std::io::Resu
     // 如果 vault 目录不存在或为空，复制示例数据
     if !vault_path.exists() || vault_path.read_dir()?.next().is_none() {
         // 尝试从打包的资源中复制示例数据
-        if let Ok(resource_dir) = app.path().resource_dir() {
-            let sample_vault = resource_dir.join("sample-vault");
-            if sample_vault.exists() {
-                println!("Copying sample vault from resources: {:?} to {:?}", sample_vault, vault_path);
-                copy_dir_all(sample_vault, vault_path)?;
-                return Ok(());
+        let sample_vault = if let Ok(resource_dir) = app.path().resource_dir() {
+            let resource_sample = resource_dir.join("sample-vault");
+            if resource_sample.exists() {
+                resource_sample
+            } else {
+                // 尝试可执行文件旁边的路径
+                app.path().executable_dir().unwrap_or_default().join("sample-vault")
             }
+        } else {
+            // 尝试可执行文件旁边的路径
+            app.path().executable_dir().unwrap_or_default().join("sample-vault")
+        };
+        
+        if sample_vault.exists() {
+            println!("Copying sample vault from: {:?} to {:?}", sample_vault, vault_path);
+            copy_dir_all(sample_vault, vault_path)?;
+            return Ok(());
         }
         
         // 如果找不到示例数据，创建基本结构
@@ -50,24 +60,25 @@ pub fn run() {
   let app = tauri::Builder::default()
     .plugin(tauri_plugin_shell::init())
     .setup(|app| {
-      if cfg!(debug_assertions) {
-        app.handle().plugin(
-          tauri_plugin_log::Builder::default()
-            .level(log::LevelFilter::Info)
-            .build(),
-        )?;
-      }
+      println!("Starting PromptManager setup...");
 
       // Portable default: vault next to the executable (e.g. on a USB drive).
-      // This makes it easy to move the whole folder and keep data together.
-      let app_dir = app.path().executable_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
-      let vault_root = app_dir.join("vault");
+      let vault_root = app
+        .path()
+        .executable_dir()
+        .unwrap_or_else(|_| std::path::PathBuf::from("."))
+        .join("vault");
 
-      // 确保 vault 目录存在并有初始数据
-      if let Err(err) = ensure_vault_data(&vault_root, &app.handle()) {
-        eprintln!("Failed to initialize vault data: {err}");
+      if let Err(err) = std::fs::create_dir_all(&vault_root) {
+        eprintln!("Failed to create vault directory: {}", err);
       }
 
+      if let Err(err) = ensure_vault_data(&vault_root, app.handle()) {
+        eprintln!("Failed to ensure vault seed data: {}", err);
+      }
+
+      // Start bundled sidecar backend (does not require system Node.js).
+      println!("Starting backend sidecar...");
       let backend = app
         .shell()
         .sidecar("server")?
@@ -78,9 +89,10 @@ pub fn run() {
       match backend {
         Ok((_rx, child)) => {
           app.manage(BackendProcess(Mutex::new(Some(child))));
+          println!("Backend server started successfully on port 3001");
         }
         Err(err) => {
-          eprintln!("Failed to spawn backend sidecar: {err}");
+          eprintln!("Failed to start backend server: {}", err);
         }
       }
 
@@ -90,14 +102,22 @@ pub fn run() {
     .expect("error while building tauri application");
 
   app.run(|app_handle, event| {
-    if let tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit = event {
-      if let Some(state) = app_handle.try_state::<BackendProcess>() {
-        if let Ok(mut guard) = state.0.lock() {
-          if let Some(child) = guard.take() {
-            let _ = child.kill();
+    match event {
+      tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit => {
+        println!("Application is closing, terminating backend server...");
+        if let Some(state) = app_handle.try_state::<BackendProcess>() {
+          if let Ok(mut guard) = state.0.lock() {
+            if let Some(child) = guard.take() {
+              println!("Killing backend process...");
+              match child.kill() {
+                Ok(_) => println!("Backend process terminated successfully"),
+                Err(e) => eprintln!("Failed to kill backend process: {}", e),
+              }
+            }
           }
         }
       }
+      _ => {}
     }
   });
 }

@@ -4,10 +4,11 @@
  */
 
 import { useState, useRef, useEffect } from 'react';
-import { ChevronRight, ChevronDown, Plus, Star, Book, Trash2, Folder, FolderOpen, Edit2, Settings, Sun, Moon, Check, X } from 'lucide-react';
+import { ChevronRight, ChevronDown, Plus, Star, Book, Trash2, Folder, FolderOpen, Edit2, Settings, Sun, Moon, Check, X, FileText } from 'lucide-react';
 import { CategoryNode } from '../types';
 import { useApp } from '../AppContext';
 import { useTheme } from '../contexts/ThemeContext';
+import { useToast } from '../contexts/ToastContext';
 
 // 快速主题切换按钮组件
 function ThemeToggleButton() {
@@ -201,9 +202,10 @@ interface ContextMenuProps {
   onRename: () => void;
   onDelete: () => void;
   onNewSubCategory: () => void;
+  onNewPrompt: () => void;
 }
 
-function ContextMenu({ x, y, onClose, onRename, onDelete, onNewSubCategory }: ContextMenuProps) {
+function ContextMenu({ x, y, onClose, onRename, onDelete, onNewSubCategory, onNewPrompt }: ContextMenuProps) {
   const menuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -235,6 +237,14 @@ function ContextMenu({ x, y, onClose, onRename, onDelete, onNewSubCategory }: Co
       style={{ left: x, top: y }}
     >
       <button
+        onClick={onNewPrompt}
+        className="w-full px-3 py-2 text-sm text-foreground hover:bg-accent flex items-center gap-2 transition-colors"
+      >
+        <FileText size={14} />
+        新建提示词
+      </button>
+      <div className="h-px bg-border my-1" />
+      <button
         onClick={onNewSubCategory}
         className="w-full px-3 py-2 text-sm text-foreground hover:bg-accent flex items-center gap-2 transition-colors"
       >
@@ -263,6 +273,7 @@ function ContextMenu({ x, y, onClose, onRename, onDelete, onNewSubCategory }: Co
 export function Sidebar() {
   const { state, dispatch, createCategory, deleteCategory, renameCategory } = useApp();
   const { fileSystem, selectedCategory, uiState } = state;
+  const { showToast } = useToast();
   const [viewMode, setViewMode] = useState<'all' | 'favorites' | 'trash'>('all');
   const [isCreatingCategory, setIsCreatingCategory] = useState(false);
   const [newCategoryName, setNewCategoryName] = useState('');
@@ -302,6 +313,11 @@ export function Sidebar() {
     setRootContextMenu(null);
   };
 
+  const handleNewPromptFromCategory = (categoryPath: string) => {
+    // 触发新建提示词模态框，并预选分类
+    dispatch({ type: 'OPEN_NEW_PROMPT_MODAL', payload: categoryPath });
+  };
+
   const handleCreateCategory = async () => {
     if (!fileSystem || !newCategoryName.trim()) {
       setIsCreatingCategory(false);
@@ -317,8 +333,9 @@ export function Sidebar() {
       setIsCreatingCategory(false);
       setNewCategoryName('');
       setNewCategoryParent(null);
+      showToast('分类创建成功', 'success');
     } catch (error) {
-      alert(`创建分类失败: ${(error as Error).message}`);
+      showToast(`创建分类失败: ${(error as Error).message}`, 'error');
     }
   };
 
@@ -357,8 +374,9 @@ export function Sidebar() {
         try {
           await deleteCategory(categoryPath);
           setConfirmDialog(prev => ({ ...prev, isOpen: false }));
+          showToast('分类删除成功', 'success');
         } catch (error) {
-          alert('删除失败: ' + (error as Error).message);
+          showToast('删除失败: ' + (error as Error).message, 'error');
         }
       }
     });
@@ -449,6 +467,7 @@ export function Sidebar() {
                   onRename={renameCategory}
                   onDelete={handleDeleteWithConfirm}
                   onCreateSubCategory={handleStartCreateCategory}
+                  onNewPrompt={handleNewPromptFromCategory}
                   isCreatingCategory={isCreatingCategory}
                   newCategoryParent={newCategoryParent}
                   newCategoryName={newCategoryName}
@@ -457,6 +476,7 @@ export function Sidebar() {
                   onCancelCreateCategory={handleCancelCreateCategory}
                   onNewCategoryKeyDown={handleNewCategoryKeyDown}
                   newCategoryInputRef={newCategoryInputRef}
+                  showToast={showToast}
                 />
               ))
             }
@@ -547,6 +567,7 @@ interface CategoryItemProps {
   onRename?: (path: string, newName: string) => Promise<void>;
   onDelete?: (categoryPath: string, categoryName: string, hasContent: boolean) => void;
   onCreateSubCategory?: (parentPath: string) => void;
+  onNewPrompt?: (categoryPath: string) => void;
   level?: number;
   isCreatingCategory?: boolean;
   newCategoryParent?: string | null;
@@ -556,6 +577,7 @@ interface CategoryItemProps {
   onCancelCreateCategory?: () => void;
   onNewCategoryKeyDown?: (e: React.KeyboardEvent) => void;
   newCategoryInputRef?: React.RefObject<HTMLInputElement>;
+  showToast?: (message: string, type?: 'success' | 'error' | 'warning' | 'info') => void;
 }
 
 function CategoryItem({ 
@@ -564,7 +586,8 @@ function CategoryItem({
   onSelect, 
   onRename, 
   onDelete, 
-  onCreateSubCategory, 
+  onCreateSubCategory,
+  onNewPrompt,
   level = 0,
   isCreatingCategory,
   newCategoryParent,
@@ -573,7 +596,8 @@ function CategoryItem({
   onCreateCategory,
   onCancelCreateCategory,
   onNewCategoryKeyDown,
-  newCategoryInputRef
+  newCategoryInputRef,
+  showToast
 }: CategoryItemProps) {
   const [isExpanded, setIsExpanded] = useState(true); // 默认展开
   const [isRenaming, setIsRenaming] = useState(false);
@@ -646,8 +670,9 @@ function CategoryItem({
       try {
         await onRename(category.path, renamingValue.trim());
         setIsRenaming(false);
+        showToast?.('重命名成功', 'success');
       } catch (error) {
-        alert('重命名失败: ' + (error as Error).message);
+        showToast?.('重命名失败: ' + (error as Error).message, 'error');
         setRenamingValue(category.name);
       }
     }
@@ -680,6 +705,13 @@ function CategoryItem({
     setContextMenu(null);
     if (onCreateSubCategory) {
       onCreateSubCategory(category.path);
+    }
+  };
+
+  const handleNewPrompt = () => {
+    setContextMenu(null);
+    if (onNewPrompt) {
+      onNewPrompt(category.path);
     }
   };
 
@@ -805,6 +837,7 @@ function CategoryItem({
               onRename={onRename}
               onDelete={onDelete}
               onCreateSubCategory={onCreateSubCategory}
+              onNewPrompt={onNewPrompt}
               level={level + 1}
               isCreatingCategory={isCreatingCategory}
               newCategoryParent={newCategoryParent}
@@ -814,6 +847,7 @@ function CategoryItem({
               onCancelCreateCategory={onCancelCreateCategory}
               onNewCategoryKeyDown={onNewCategoryKeyDown}
               newCategoryInputRef={newCategoryInputRef}
+              showToast={showToast}
             />
           ))}
         </div>
@@ -828,6 +862,7 @@ function CategoryItem({
           onRename={handleStartRename}
           onDelete={handleDelete}
           onNewSubCategory={handleNewSubCategory}
+          onNewPrompt={handleNewPrompt}
         />
       )}
     </div>

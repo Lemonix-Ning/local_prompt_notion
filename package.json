@@ -6,16 +6,16 @@
   "main": "index.js",
   "scripts": {
     "dev": "vite",
-    "dev:client": "vite --port 3002 --strictPort",
-    "dev:server": "npm --prefix server start",
+    "dev:client": "vite --port 3000 --strictPort",
+    "dev:server": "set PORT=3001 && npm --prefix server start",
     "dev:api": "concurrently -k -n server,client -c blue,green \"npm run dev:server\" \"npm run dev:client\"",
     "build": "tsc && vite build",
     "preview": "vite preview",
     "lint": "eslint src --ext ts,tsx",
     "tauri": "tauri",
     "build:sidecar": "node scripts/build-sidecar.mjs",
-    "desktop:dev": "npm run build:sidecar && npm run tauri dev",
-    "desktop:build": "npm run build:sidecar && npm run tauri build"
+    "desktop:dev": "npm run tauri dev",
+    "desktop:build": "npm run tauri build"
   },
   "keywords": [
     "prompt",
@@ -26,6 +26,7 @@
   "author": "",
   "license": "MIT",
   "dependencies": {
+    "@tauri-apps/api": "^2.9.1",
     "lucide-react": "^0.294.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
@@ -33,7 +34,6 @@
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.9.6",
-    "@yao-pkg/pkg": "^5.13.1",
     "@types/node": "^20.10.0",
     "@types/react": "^18.2.43",
     "@types/react-dom": "^18.2.17",
@@ -41,6 +41,7 @@
     "@typescript-eslint/eslint-plugin": "^6.13.2",
     "@typescript-eslint/parser": "^6.13.2",
     "@vitejs/plugin-react": "^4.2.1",
+    "@yao-pkg/pkg": "^5.13.1",
     "autoprefixer": "^10.4.16",
     "concurrently": "^8.2.2",
     "eslint": "^8.55.0",

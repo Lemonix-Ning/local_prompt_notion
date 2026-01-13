@@ -22,6 +22,12 @@ const initialState: AppState = {
     sidebarOpen: true,
     editorMode: 'edit',
     isLoading: false,
+    newPromptModal: {
+      isOpen: false,
+    },
+    editorOverlay: {
+      isOpen: false,
+    },
   },
   settings: {
     theme: 'light',
@@ -159,6 +165,53 @@ function appReducer(state: AppState, action: AppAction): AppState {
         settings: {
           ...state.settings,
           ...action.payload,
+        },
+      };
+
+    case 'OPEN_NEW_PROMPT_MODAL':
+      return {
+        ...state,
+        uiState: {
+          ...state.uiState,
+          newPromptModal: {
+            isOpen: true,
+            preselectedCategory: action.payload,
+          },
+        },
+      };
+
+    case 'CLOSE_NEW_PROMPT_MODAL':
+      return {
+        ...state,
+        uiState: {
+          ...state.uiState,
+          newPromptModal: {
+            isOpen: false,
+          },
+        },
+      };
+
+    case 'OPEN_EDITOR_OVERLAY':
+      return {
+        ...state,
+        uiState: {
+          ...state.uiState,
+          editorOverlay: {
+            isOpen: true,
+            promptId: action.payload.promptId,
+            originCardId: action.payload.originCardId,
+          },
+        },
+      };
+
+    case 'CLOSE_EDITOR_OVERLAY':
+      return {
+        ...state,
+        uiState: {
+          ...state.uiState,
+          editorOverlay: {
+            isOpen: false,
+          },
         },
       };
 

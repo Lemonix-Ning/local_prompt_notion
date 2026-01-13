@@ -110,7 +110,8 @@ local_prompt_notion/
 │   │   └── tagColors.ts          # 确定性标签颜色系统
 │   ├── App.tsx                   # 主应用组件
 │   ├── AppContext.tsx            # 全局状态管理
-│   ├── fileSystemAdapter.ts      # 文件系统适配器(本地/模拟)
+│   ├── fileSystemAdapter.ts      # 文件系统适配器(Node环境/本地)
+│   ├── mockFileSystemAdapter.ts  # Mock 适配器(浏览器/前端安全)
 │   ├── types.ts                  # TypeScript 类型定义
 │   ├── index.css                 # 全局样式(主题系统)
 │   └── index.tsx                 # 入口文件
@@ -242,9 +243,9 @@ npm run build
 ```bash
 npm run desktop:build
 # 生成以下文件:
-# - src-tauri/target/release/app.exe (绿色版，直接运行)
-# - src-tauri/target/release/bundle/msi/Local Prompt Notion_0.1.0_x64_en-US.msi (MSI安装包)
-# - src-tauri/target/release/bundle/nsis/Local Prompt Notion_0.1.0_x64-setup.exe (NSIS安装包)
+# - src-tauri/target/release/promptmanager.exe
+# - src-tauri/target/release/bundle/msi/PromptManager_1.0.0_x64_en-US.msi
+# - src-tauri/target/release/bundle/nsis/PromptManager_1.0.0_x64-setup.exe
 ```
 
 **桌面应用特性**:
@@ -578,6 +579,22 @@ MIT License
 ##  故障排查
 
 详见 [TROUBLESHOOTING.md](./TROUBLESHOOTING.md)
+
+### 桌面版窗口按钮/拖拽失效
+
+如果桌面版出现“右上角最小化/最大化/关闭不可用”或“窗口无法拖动”，请检查:
+
+1. `src-tauri/tauri.conf.json` 是否启用了 capabilities:
+
+   - `app.security.capabilities: ["default"]`
+
+2. `src-tauri/capabilities/default.json` 是否包含窗口权限(示例):
+
+   - `core:window:allow-minimize`
+   - `core:window:allow-maximize`
+   - `core:window:allow-unmaximize`
+   - `core:window:allow-close`
+   - `core:window:allow-start-dragging`
 
 ---
 

@@ -46,8 +46,10 @@ export class ApiFileSystemAdapter implements IFileSystemAdapter {
     }
 
     const allPrompts = new Map<string, PromptData>();
-    Object.entries(response.data.allPrompts || {}).forEach(([id, prompt]) => {
-      allPrompts.set(id, prompt as PromptData);
+    Object.entries(response.data.allPrompts || {}).forEach(([, prompt]) => {
+      const promptData = prompt as PromptData;
+      // 使用 prompt.meta.id 作为 key，而不是文件路径
+      allPrompts.set(promptData.meta.id, promptData);
     });
 
     this.rebuildPathIndex(response.data.categories || []);

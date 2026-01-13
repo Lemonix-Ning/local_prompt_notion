@@ -10,6 +10,13 @@ coverage/
 dist/
 build/
 
+# Backend build artifacts
+server-dist/
+src-tauri/server-dist/
+
+# Local helper scripts
+server/start-server-3002.bat
+
 # Tauri
 src-tauri/target/
 src-tauri/binaries/
@@ -18,6 +25,7 @@ src-tauri/gen/
 
 # Environment
 .env
+.env.tauri
 .env.local
 .env.development.local
 .env.test.local
@@ -44,6 +52,19 @@ Thumbs.db
 # Runtime files
 sample-vault/trash/.trash-visits.json
 sample-vault/.config/
+
+# Local vault/test data (keep local, don't commit)
+vault/
+test-vault/
+
+# Duplicated sample data under build folders (keep only repo root sample-vault/)
+src-tauri/sample-vault/
+server/sample-vault/
+
+# Local temp folders accidentally created under sample-vault
+sample-vault/123/
+sample-vault/1234/
+sample-vault/dasRenamed/
 
 # Temporary files
 PROJECT_COMPLETION_SUMMARY.md

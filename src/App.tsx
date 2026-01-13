@@ -5,10 +5,14 @@
 import { useEffect, useMemo } from 'react';
 import { AppProvider, useApp } from './AppContext';
 import { ThemeProvider } from './contexts/ThemeContext';
-import { MockFileSystemAdapter } from './fileSystemAdapter';
+import { ToastProvider, ToastContainer } from './contexts/ToastContext';
+import { ConfirmProvider } from './contexts/ConfirmContext';
+import { MockFileSystemAdapter } from './mockFileSystemAdapter';
 import { ApiFileSystemAdapter } from './adapters/ApiFileSystemAdapter';
 import { Sidebar } from './components/Sidebar';
 import { PromptList } from './components/PromptList';
+import { EditorOverlay } from './components/EditorOverlay';
+// import { TopBar } from './components/TopBar';
 import api from './api/client';
 
 /**
@@ -19,7 +23,7 @@ interface AppContentProps {
 }
 
 function AppContent({ initialRoot }: AppContentProps) {
-  const { state, loadVault } = useApp();
+  const { state, loadVault, dispatch } = useApp();
 
   useEffect(() => {
     (async () => {
@@ -52,6 +56,18 @@ function AppContent({ initialRoot }: AppContentProps) {
         <Sidebar />
         <PromptList />
       </div>
+      <ToastContainer />
+      
+      {/* 编辑器动画覆盖层 */}
+      {state.uiState.editorOverlay.isOpen && 
+       state.uiState.editorOverlay.promptId && 
+       state.uiState.editorOverlay.originCardId && (
+        <EditorOverlay
+          promptId={state.uiState.editorOverlay.promptId}
+          originCardId={state.uiState.editorOverlay.originCardId}
+          onClose={() => dispatch({ type: 'CLOSE_EDITOR_OVERLAY' })}
+        />
+      )}
     </div>
   );
 }
@@ -69,9 +85,13 @@ export default function App() {
 
   return (
     <ThemeProvider>
-      <AppProvider adapter={adapter}>
-        <AppContent initialRoot={initialRoot} />
-      </AppProvider>
+      <ToastProvider>
+        <ConfirmProvider>
+          <AppProvider adapter={adapter}>
+            <AppContent initialRoot={initialRoot} />
+          </AppProvider>
+        </ConfirmProvider>
+      </ToastProvider>
     </ThemeProvider>
   );
 }

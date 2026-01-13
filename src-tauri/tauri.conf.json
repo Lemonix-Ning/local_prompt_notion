@@ -7,7 +7,7 @@
     "frontendDist": "../dist",
     "devUrl": "http://localhost:3002",
     "beforeDevCommand": "npm run dev:client",
-    "beforeBuildCommand": "npm run build"
+    "beforeBuildCommand": "copy .env.tauri .env && npm run build"
   },
   "app": {
     "windows": [
@@ -16,10 +16,18 @@
         "width": 1200,
         "height": 800,
         "resizable": true,
-        "fullscreen": false
+        "fullscreen": false,
+        "decorations": false,
+        "transparent": false,
+        "center": true,
+        "minWidth": 800,
+        "minHeight": 600
       }
     ],
     "security": {
+      "capabilities": [
+        "default"
+      ],
       "csp": null
     }
   },
@@ -30,7 +38,7 @@
       "binaries/server"
     ],
     "resources": [
-      "../sample-vault"
+      "sample-vault"
     ],
     "icon": [
       "icons/icon.ico"

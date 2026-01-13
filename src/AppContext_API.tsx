@@ -22,6 +22,12 @@ const initialState: AppState = {
     sidebarOpen: true,
     editorMode: 'edit',
     isLoading: false,
+    newPromptModal: {
+      isOpen: false,
+    },
+    editorOverlay: {
+      isOpen: false,
+    },
   },
   settings: {
     theme: 'light',
