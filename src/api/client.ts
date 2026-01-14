@@ -66,6 +66,11 @@ export const api = {
         method: 'POST',
         body: JSON.stringify({ parentPath, name }),
       }),
+    move: (categoryPath: string, targetParentPath: string) =>
+      request('/categories/move', {
+        method: 'PUT',
+        body: JSON.stringify({ categoryPath, targetParentPath }),
+      }),
     rename: (categoryPath: string, newName: string) =>
       request('/categories/rename', {
         method: 'PUT',

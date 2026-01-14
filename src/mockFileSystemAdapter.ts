@@ -7,6 +7,16 @@ import { IFileSystemAdapter, FileSystemState, PromptData, PromptMetadata, Catego
 
 export class MockFileSystemAdapter implements IFileSystemAdapter {
   private storage: Map<string, PromptData> = new Map();
+  private mockData: FileSystemState;
+
+  constructor() {
+    const mock = this.getMockData();
+    this.mockData = {
+      root: '/vault',
+      categories: mock.categories,
+      allPrompts: mock.allPrompts,
+    };
+  }
 
   async scanVault(rootPath: string): Promise<FileSystemState> {
     // 返回模拟数据
@@ -77,7 +87,23 @@ export class MockFileSystemAdapter implements IFileSystemAdapter {
   }
 
   async renameCategory(categoryPath: string, newName: string): Promise<void> {
-    console.log(`Renaming category: ${categoryPath} to ${newName}`);
+    // Mock 实现：简单更新内存中的分类名称
+    const updateCategoryName = (nodes: CategoryNode[]): boolean => {
+      for (const node of nodes) {
+        if (node.path === categoryPath) {
+          node.name = newName;
+          return true;
+        }
+        if (updateCategoryName(node.children)) return true;
+      }
+      return false;
+    };
+
+    updateCategoryName(this.mockData.categories);
+  }
+
+  async moveCategory(_categoryPath: string, _targetParentPath: string): Promise<{ name: string; path: string; usedFallback?: boolean }> {
+    throw new Error('MockFileSystemAdapter: moveCategory is not supported in mock mode');
   }
 
   async deleteCategory(categoryPath: string): Promise<void> {

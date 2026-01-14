@@ -16,6 +16,26 @@ import {
 
 export class FileSystemAdapter implements IFileSystemAdapter {
   /**
+   * 移动分类到新的父目录
+   */
+  async moveCategory(
+    categoryPath: string,
+    newParentPath: string
+  ): Promise<{ name: string; path: string; usedFallback?: boolean }> {
+    const categoryName = path.basename(categoryPath);
+    const newPath = path.join(newParentPath, categoryName);
+    
+    // 确保目标路径不存在
+    if (await this.fileExists(newPath)) {
+      throw new Error(`Category "${categoryName}" already exists in target location`);
+    }
+    
+    // 移动分类
+    await fs.rename(categoryPath, newPath);
+
+    return { name: categoryName, path: newPath };
+  }
+  /**
    * 扫描 Vault 目录,构建文件系统状态
    */
   async scanVault(rootPath: string): Promise<FileSystemState> {
@@ -376,6 +396,21 @@ export class FileSystemAdapter implements IFileSystemAdapter {
  * 模拟文件系统适配器(用于浏览器环境)
  */
 export class MockFileSystemAdapter implements IFileSystemAdapter {
+  /**
+   * 移动分类到新的父目录
+   */
+  async moveCategory(
+    categoryPath: string,
+    newParentPath: string
+  ): Promise<{ name: string; path: string; usedFallback?: boolean }> {
+    // Mock 环境模拟移动分类
+    console.log(`Moving category: ${categoryPath} to ${newParentPath}`);
+
+    const name = categoryPath.split(/[/\\]/).filter(Boolean).pop() || '';
+    const newPath = `${newParentPath}/${name}`;
+    return { name, path: newPath, usedFallback: true };
+  }
+
   private storage: Map<string, PromptData> = new Map();
 
   async scanVault(rootPath: string): Promise<FileSystemState> {

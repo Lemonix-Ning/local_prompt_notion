@@ -4,8 +4,124 @@
  */
 
 import React, { createContext, useContext, useReducer, ReactNode, useRef, useCallback } from 'react';
-import { AppState, AppAction, PromptData } from './types';
+import { AppState, AppAction, PromptData, FileSystemState, CategoryNode } from './types';
 import { IFileSystemAdapter } from './types';
+
+/**
+ * 增量更新文件系统状态中的分类位置
+ * 避免完整的 vault 重新扫描以提升性能
+ */
+function updateCategoryInFileSystem(
+  fileSystem: FileSystemState,
+  oldCategoryPath: string,
+  newParentPath: string,
+  newCategoryPath: string
+): FileSystemState | null {
+  try {
+    // 正确地深拷贝文件系统数据，保持 Map 对象的类型
+    const updatedFileSystem: FileSystemState = {
+      root: fileSystem.root,
+      categories: JSON.parse(JSON.stringify(fileSystem.categories)),
+      allPrompts: new Map(fileSystem.allPrompts) // 正确拷贝 Map 对象
+    };
+    
+    // 查找并移除旧位置的分类
+    const movedCategory = findAndRemoveCategory(updatedFileSystem.categories, oldCategoryPath);
+    if (!movedCategory) {
+      console.warn('Could not find category to move:', oldCategoryPath);
+      return null;
+    }
+    
+    // 更新分类路径
+    updateCategoryPaths(movedCategory, newCategoryPath);
+    
+    // 将分类插入到新位置
+    if (!insertCategoryAtPath(updatedFileSystem.categories, newParentPath, movedCategory, fileSystem.root)) {
+      console.warn('Could not insert category at new location:', newParentPath);
+      return null;
+    }
+    
+    return updatedFileSystem;
+  } catch (error) {
+    console.error('Error updating category in file system:', error);
+    return null;
+  }
+}
+
+/**
+ * 查找并移除指定路径的分类
+ */
+function findAndRemoveCategory(categories: CategoryNode[], targetPath: string): CategoryNode | null {
+  for (let i = 0; i < categories.length; i++) {
+    const category = categories[i];
+    
+    if (category.path === targetPath) {
+      // 找到目标分类，移除并返回
+      return categories.splice(i, 1)[0];
+    }
+    
+    // 递归搜索子分类
+    if (category.children.length > 0) {
+      const found = findAndRemoveCategory(category.children, targetPath);
+      if (found) return found;
+    }
+  }
+  
+  return null;
+}
+
+/**
+ * 递归更新分类及其子分类的路径
+ */
+function updateCategoryPaths(category: CategoryNode, newBasePath: string): void {
+  category.path = newBasePath;
+  
+  // 更新子分类路径
+  category.children.forEach(child => {
+    const childName = child.name;
+    const newChildPath = `${newBasePath}/${childName}`;
+    updateCategoryPaths(child, newChildPath);
+  });
+  
+  // 更新提示词路径（如果需要的话）
+  category.prompts.forEach(_prompt => {
+    // 提示词的实际文件路径会在服务器端处理
+    // 这里只需要确保内存中的数据结构正确
+  });
+}
+
+/**
+ * 将分类插入到指定父路径下
+ */
+function insertCategoryAtPath(
+  categories: CategoryNode[], 
+  parentPath: string, 
+  categoryToInsert: CategoryNode,
+  rootPath: string
+): boolean {
+  // 如果是根目录，直接插入
+  if (parentPath === rootPath) {
+    categories.push(categoryToInsert);
+    return true;
+  }
+  
+  // 查找目标父分类
+  for (const category of categories) {
+    if (category.path === parentPath) {
+      category.children.push(categoryToInsert);
+      return true;
+    }
+    
+    // 递归搜索子分类
+    if (category.children.length > 0) {
+      if (insertCategoryAtPath(category.children, parentPath, categoryToInsert, rootPath)) {
+        return true;
+      }
+    }
+  }
+  
+  return false;
+}
 
 /**
  * 初始状态
@@ -229,12 +345,14 @@ interface AppContextType {
   adapter: IFileSystemAdapter;
   // 辅助方法
   loadVault: (rootPath: string) => Promise<void>;
+  refreshVault: () => Promise<void>;
   savePrompt: (prompt: PromptData) => Promise<void>;
   deletePrompt: (promptId: string, permanent?: boolean) => Promise<void>;
   restorePrompt: (promptId: string) => Promise<void>;
   createPrompt: (categoryPath: string, title: string) => Promise<PromptData>;
   createCategory: (parentPath: string, name: string) => Promise<void>;
   renameCategory: (categoryPath: string, newName: string) => Promise<void>;
+  moveCategory: (categoryPath: string, targetParentPath: string) => Promise<void>;
   deleteCategory: (categoryPath: string) => Promise<void>;
   getFilteredPrompts: () => PromptData[];
   getCurrentPrompt: () => PromptData | null;
@@ -370,6 +488,33 @@ export function AppProvider({ children, adapter }: AppProviderProps) {
     }
   };
 
+  const moveCategory = async (categoryPath: string, targetParentPath: string) => {
+    try {
+      const result = await adapter.moveCategory(categoryPath, targetParentPath);
+      
+      // 性能优化：增量更新状态而不是完整重新扫描
+      if (state.fileSystem) {
+        const updatedFileSystem = updateCategoryInFileSystem(
+          state.fileSystem, 
+          categoryPath, 
+          targetParentPath, 
+          result.path
+        );
+        
+        if (updatedFileSystem) {
+          dispatch({ type: 'LOAD_VAULT', payload: updatedFileSystem });
+          return;
+        }
+      }
+      
+      // 如果增量更新失败，回退到完整刷新
+      await refreshVault();
+    } catch (error) {
+      console.error('Error moving category:', error);
+      throw error;
+    }
+  };
+
   const deleteCategory = async (categoryPath: string) => {
     try {
       await adapter.deleteCategory(categoryPath);
@@ -458,12 +603,14 @@ export function AppProvider({ children, adapter }: AppProviderProps) {
     dispatch,
     adapter,
     loadVault,
+    refreshVault,
     savePrompt,
     deletePrompt,
     restorePrompt,
     createPrompt,
     createCategory,
     renameCategory,
+    moveCategory,
     deleteCategory,
     getFilteredPrompts,
     getCurrentPrompt,

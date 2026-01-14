@@ -4,11 +4,14 @@
  */
 
 import { useState, useRef, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { ChevronRight, ChevronDown, Plus, Star, Book, Trash2, Folder, FolderOpen, Edit2, Settings, Sun, Moon, Check, X, FileText } from 'lucide-react';
 import { CategoryNode } from '../types';
 import { useApp } from '../AppContext';
 import { useTheme } from '../contexts/ThemeContext';
 import { useToast } from '../contexts/ToastContext';
+import { analyzeCategoryContent, CategoryContentInfo } from '../utils/categoryContentAnalyzer';
+import { DeleteCategoryDialog, DeleteOptions } from './DeleteCategoryDialog';
 
 // 快速主题切换按钮组件
 function ThemeToggleButton() {
@@ -50,16 +53,16 @@ const SidebarItem = ({
 }) => (
   <div 
     onClick={onClick}
-    className={`group flex items-center justify-between px-3 py-2 text-sm rounded-lg cursor-pointer transition-colors ${
-      active ? 'bg-accent text-foreground font-medium' : 'text-muted-foreground hover:bg-accent hover:text-foreground'
+    className={`group flex items-center justify-between px-3 py-2 text-sm rounded-lg cursor-pointer notion-sidebar-item ${
+      active ? 'active' : ''
     }`}
   >
     <div className="flex items-center gap-2">
-      <Icon size={18} className={active ? "text-primary" : "text-muted-foreground group-hover:text-foreground"} />
+      <Icon size={18} className={active ? "notion-sidebar-folder active" : "notion-sidebar-folder"} />
       <span className="truncate">{label}</span>
     </div>
     {count !== undefined && (
-      <span className="text-xs text-muted-foreground group-hover:text-foreground">{count}</span>
+      <span className="text-xs notion-sidebar-text-muted">{count}</span>
     )}
   </div>
 );
@@ -203,9 +206,10 @@ interface ContextMenuProps {
   onDelete: () => void;
   onNewSubCategory: () => void;
   onNewPrompt: () => void;
+  onMoveToRoot?: () => void;
 }
 
-function ContextMenu({ x, y, onClose, onRename, onDelete, onNewSubCategory, onNewPrompt }: ContextMenuProps) {
+function ContextMenu({ x, y, onClose, onRename, onDelete, onNewSubCategory, onNewPrompt, onMoveToRoot }: ContextMenuProps) {
   const menuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -230,12 +234,20 @@ function ContextMenu({ x, y, onClose, onRename, onDelete, onNewSubCategory, onNe
     };
   }, [onClose]);
 
-  return (
+  return createPortal(
     <div
       ref={menuRef}
-      className="fixed z-50 bg-popover/95 backdrop-blur-xl border border-border rounded-lg shadow-2xl py-1 min-w-[160px]"
+      className="fixed z-[9999] bg-popover/95 backdrop-blur-xl border border-border rounded-lg shadow-2xl py-1 min-w-[160px]"
       style={{ left: x, top: y }}
     >
+      <button
+        onClick={onMoveToRoot}
+        className="w-full px-3 py-2 text-sm text-foreground hover:bg-accent flex items-center gap-2 transition-colors"
+      >
+        <FolderOpen size={14} />
+        移动到根目录
+      </button>
+      <div className="h-px bg-border my-1" />
       <button
         onClick={onNewPrompt}
         className="w-full px-3 py-2 text-sm text-foreground hover:bg-accent flex items-center gap-2 transition-colors"
@@ -266,27 +278,55 @@ function ContextMenu({ x, y, onClose, onRename, onDelete, onNewSubCategory, onNe
         <Trash2 size={14} />
         删除
       </button>
-    </div>
+    </div>,
+    document.body
   );
 }
 
 export function Sidebar() {
-  const { state, dispatch, createCategory, deleteCategory, renameCategory } = useApp();
+  const { state, dispatch, createCategory, deleteCategory, renameCategory, moveCategory, refreshVault } = useApp();
   const { fileSystem, selectedCategory, uiState } = state;
   const { showToast } = useToast();
   const [viewMode, setViewMode] = useState<'all' | 'favorites' | 'trash'>('all');
   const [isCreatingCategory, setIsCreatingCategory] = useState(false);
   const [newCategoryName, setNewCategoryName] = useState('');
   const [newCategoryParent, setNewCategoryParent] = useState<string | null>(null);
+  const [isDroppingToRoot, setIsDroppingToRoot] = useState(false);
   const [confirmDialog, setConfirmDialog] = useState<{
     isOpen: boolean;
     title: string;
     message: string;
     onConfirm: () => void;
   }>({ isOpen: false, title: '', message: '', onConfirm: () => {} });
+  const [deleteDialog, setDeleteDialog] = useState<{
+    isOpen: boolean;
+    originId: string;
+    categoryPath: string;
+    categoryName: string;
+    contentInfo: CategoryContentInfo | null;
+  }>({ isOpen: false, originId: '', categoryPath: '', categoryName: '', contentInfo: null });
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [rootContextMenu, setRootContextMenu] = useState<{ x: number; y: number } | null>(null);
   const newCategoryInputRef = useRef<HTMLInputElement>(null);
+
+  // 全局拖拽结束监听器，确保所有拖拽状态都被清除
+  useEffect(() => {
+    const handleDragEnd = () => {
+      setIsDroppingToRoot(false);
+    };
+
+    const handleDrop = () => {
+      setIsDroppingToRoot(false);
+    };
+
+    document.addEventListener('dragend', handleDragEnd);
+    document.addEventListener('drop', handleDrop);
+
+    return () => {
+      document.removeEventListener('dragend', handleDragEnd);
+      document.removeEventListener('drop', handleDrop);
+    };
+  }, []);
 
   // 自动聚焦到新建分类输入框
   useEffect(() => {
@@ -326,7 +366,9 @@ export function Sidebar() {
       return;
     }
 
-    const parentPath = newCategoryParent || selectedCategory || fileSystem.root;
+    // 只有明确指定了 parentPath（从某个分类上“新建子分类”）才创建到该分类下。
+    // 否则一律创建在根目录，避免“在空白处右键新建却跑到当前选中分类下面”。
+    const parentPath = newCategoryParent || fileSystem.root;
 
     try {
       await createCategory(parentPath, newCategoryName.trim());
@@ -355,31 +397,109 @@ export function Sidebar() {
     }
   };
 
-  const handleDeleteWithConfirm = (categoryPath: string, categoryName: string, hasContent: boolean) => {
-    if (hasContent) {
-      setConfirmDialog({
-        isOpen: true,
-        title: '无法删除分类',
-        message: '此分类中还有提示词或子分类，请先移动或删除分类中的所有内容。',
-        onConfirm: () => setConfirmDialog(prev => ({ ...prev, isOpen: false }))
-      });
+  const handleMoveCategory = async (categoryPath: string, targetParentPath: string) => {
+    if (!fileSystem) return;
+
+    // 优化的路径标准化函数
+    const normalizePath = (p: string) => p.replace(/\\/g, '/').replace(/\/+$/, '');
+    
+    const sourcePath = normalizePath(categoryPath);
+    const targetPath = normalizePath(targetParentPath);
+    
+    // 计算源文件的父目录
+    const sourceParentPath = sourcePath.substring(0, sourcePath.lastIndexOf('/')) || normalizePath(fileSystem.root);
+
+    // 性能优化：前端拦截无效操作，避免不必要的网络请求
+
+    // 拖拽到相同位置 - 静默返回
+    if (sourceParentPath === targetPath) {
       return;
     }
 
-    setConfirmDialog({
-      isOpen: true,
-      title: '删除分类',
-      message: `确定要删除分类"${categoryName}"吗？此操作无法撤销。`,
-      onConfirm: async () => {
+    // 拖拽到自己 - 静默返回  
+    if (sourcePath === targetPath) {
+      return;
+    }
+
+    // 拖拽到子目录 - 显示警告
+    if (targetPath.startsWith(sourcePath + '/')) {
+      showToast('无法将分类移动到其子分类中', 'warning');
+      return;
+    }
+
+    try {
+      // 🚀 前端乐观更新：立即执行服务器操作，不显示加载提示
+      await moveCategory(categoryPath, targetParentPath);
+      
+      // 延迟刷新，确保数据一致性，但不影响用户体验
+      setTimeout(async () => {
         try {
-          await deleteCategory(categoryPath);
-          setConfirmDialog(prev => ({ ...prev, isOpen: false }));
-          showToast('分类删除成功', 'success');
+          await refreshVault();
         } catch (error) {
-          showToast('删除失败: ' + (error as Error).message, 'error');
+          console.warn('Background refresh failed:', error);
+        }
+      }, 1000);
+      
+    } catch (error) {
+      showToast('移动失败: ' + (error as Error).message, 'error');
+    }
+  };
+
+  const handleDeleteWithConfirm = (categoryPath: string, categoryName: string, _hasContent: boolean, originId: string) => {
+    // 找到对应的分类节点来分析内容（Windows 下可能存在 \\ 与 / 混用）
+    const normalize = (p: string) => p.replace(/\\/g, '/');
+
+    const findCategoryNode = (nodes: CategoryNode[], path: string): CategoryNode | null => {
+      const target = normalize(path);
+      for (const node of nodes) {
+        if (normalize(node.path) === target) return node;
+        if (node.children.length > 0) {
+          const found = findCategoryNode(node.children, path);
+          if (found) return found;
         }
       }
+      return null;
+    };
+
+    const categoryNode = fileSystem ? findCategoryNode(fileSystem.categories, categoryPath) : null;
+
+    const contentInfo = categoryNode
+      ? analyzeCategoryContent(categoryNode)
+      : {
+          promptCount: 0,
+          subcategoryCount: 0,
+          totalSize: 0,
+          isEmpty: true,
+          hasPrompts: false,
+          hasSubcategories: false,
+        };
+
+    // 始终使用增强的删除对话框（带共享元素动画）
+    setDeleteDialog({
+      isOpen: true,
+      originId,
+      categoryPath,
+      categoryName,
+      contentInfo,
     });
+  };
+
+  const handleDeleteConfirm = async (categoryPath: string, _options: DeleteOptions) => {
+    try {
+      await deleteCategory(categoryPath);
+      setDeleteDialog((prev) => ({ ...prev, isOpen: false }));
+      showToast('分类已移动到回收站', 'success');
+    } catch (error) {
+      showToast('删除失败: ' + (error as Error).message, 'error');
+    }
+  };
+
+  const handleDeleteCancel = () => {
+    setDeleteDialog((prev) => ({ ...prev, isOpen: false }));
+  };
+
+  const handleDeleteClosed = () => {
+    setDeleteDialog({ isOpen: false, originId: '', categoryPath: '', categoryName: '', contentInfo: null });
   };
 
   const handleViewAll = () => {
@@ -397,9 +517,8 @@ export function Sidebar() {
     dispatch({ type: 'SELECT_CATEGORY', payload: 'trash' });
   };
 
-  if (!uiState.sidebarOpen) {
-    return null;
-  }
+  const isSidebarOpen = uiState.sidebarOpen;
+  const sidebarWidthPx = 256;
 
   const allPrompts = Array.from(fileSystem?.allPrompts.values() || []);
   const isInTrash = (path: string) => path.includes('/trash/') || path.includes('\\trash\\');
@@ -409,7 +528,21 @@ export function Sidebar() {
 
   return (
     <>
-      <div className="w-64 bg-background/80 backdrop-blur-xl border-r border-border flex flex-col transition-all duration-300">
+      <div
+        className="notion-sidebar backdrop-blur-xl flex flex-col"
+        data-tauri-drag-region={false}
+        style={{
+          width: isSidebarOpen ? `${sidebarWidthPx}px` : '0px',
+          transform: isSidebarOpen ? 'translateX(0)' : 'translateX(-24px)',
+          opacity: isSidebarOpen ? 1 : 0,
+          overflow: 'hidden',
+          flexShrink: 0,
+          pointerEvents: isSidebarOpen ? 'auto' : 'none',
+          borderRight: isSidebarOpen ? '1px solid var(--border)' : '1px solid transparent',
+          transition:
+            'width 0.26s cubic-bezier(0.2, 0.8, 0.2, 1), transform 0.26s cubic-bezier(0.2, 0.8, 0.2, 1), opacity 0.18s ease',
+        }}
+      >
         {/* Workspace Header */}
         <div className="p-3 mx-2 mt-2 hover:bg-accent rounded-lg cursor-pointer transition-colors flex items-center gap-2 mb-2">
           <div className="w-5 h-5 bg-gradient-to-br from-foreground to-muted-foreground rounded flex items-center justify-center text-background text-xs font-bold shadow-sm">P</div>
@@ -445,15 +578,43 @@ export function Sidebar() {
           />
           
           <div 
-            className="mt-6 px-3 text-xs font-semibold text-muted-foreground mb-2 uppercase tracking-wider"
+            className="mt-6 px-3 text-xs font-semibold notion-sidebar-text-muted mb-2 uppercase tracking-wider"
           >
             LIBRARY
           </div>
           
           {/* 分类列表容器 - 使用 flex-1 撑满剩余空间，确保右键区域覆盖 */}
           <div 
-            className="flex-1 space-y-0.5 min-h-0"
+            className={`flex-1 space-y-0.5 min-h-0 ${isDroppingToRoot ? 'ring-2 ring-primary/30 rounded-lg' : ''}`}
             onContextMenu={handleLibraryContextMenu}
+            onDragOver={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              if (!fileSystem) return;
+              setIsDroppingToRoot(true);
+            }}
+            onDragLeave={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              // 只有当鼠标真正离开根目录区域时才清除状态
+              const rect = e.currentTarget.getBoundingClientRect();
+              const x = e.clientX;
+              const y = e.clientY;
+              
+              if (x < rect.left || x > rect.right || y < rect.top || y > rect.bottom) {
+                setIsDroppingToRoot(false);
+              }
+            }}
+            onDrop={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              setIsDroppingToRoot(false); // 立即清除状态
+              if (!fileSystem) return;
+              const sourcePath = e.dataTransfer.getData('text/plain');
+              if (!sourcePath) return;
+              handleMoveCategory(sourcePath, fileSystem.root);
+            }}
+            data-tauri-drag-region={false}
           >
             {/* 分类列表 */}
             {fileSystem?.categories
@@ -468,6 +629,8 @@ export function Sidebar() {
                   onDelete={handleDeleteWithConfirm}
                   onCreateSubCategory={handleStartCreateCategory}
                   onNewPrompt={handleNewPromptFromCategory}
+                  onMove={handleMoveCategory}
+                  rootPath={fileSystem.root}
                   isCreatingCategory={isCreatingCategory}
                   newCategoryParent={newCategoryParent}
                   newCategoryName={newCategoryName}
@@ -485,7 +648,7 @@ export function Sidebar() {
             {isCreatingCategory && !newCategoryParent && (
               <div className="flex items-center gap-2 px-2 py-1.5 text-sm rounded-md bg-accent border border-border">
                 <div className="w-4" /> {/* 箭头占位 */}
-                <Folder size={16} className="text-muted-foreground flex-shrink-0" />
+                <Folder size={16} className="notion-sidebar-folder flex-shrink-0" />
                 <input
                   ref={newCategoryInputRef}
                   type="text"
@@ -494,14 +657,14 @@ export function Sidebar() {
                   onKeyDown={handleNewCategoryKeyDown}
                   onBlur={handleCreateCategory}
                   placeholder="输入分类名称..."
-                  className="flex-1 bg-transparent text-foreground placeholder:text-muted-foreground outline-none"
+                  className="flex-1 bg-transparent notion-sidebar-text-primary placeholder:notion-sidebar-text-muted outline-none"
                 />
               </div>
             )}
           </div>
         </div>
         
-        <div className="p-2 border-t border-border bg-background/60 space-y-2">
+        <div className="p-2 border-t border-border space-y-2">
           {/* 快速主题切换按钮 */}
           <ThemeToggleButton />
           
@@ -516,9 +679,9 @@ export function Sidebar() {
       </div>
 
       {/* 根目录右键菜单 */}
-      {rootContextMenu && (
+      {rootContextMenu && createPortal(
         <div
-          className="fixed z-50 bg-popover/95 backdrop-blur-xl border border-border rounded-lg shadow-2xl py-1 min-w-[160px]"
+          className="fixed z-[9999] bg-popover/95 backdrop-blur-xl border border-border rounded-lg shadow-2xl py-1 min-w-[160px]"
           style={{ left: rootContextMenu.x, top: rootContextMenu.y }}
         >
           <button
@@ -528,7 +691,8 @@ export function Sidebar() {
             <Plus size={14} />
             新建分类
           </button>
-        </div>
+        </div>,
+        document.body
       )}
 
       {/* 点击外部关闭根目录菜单 */}
@@ -553,6 +717,17 @@ export function Sidebar() {
         isOpen={settingsOpen}
         onClose={() => setSettingsOpen(false)}
       />
+
+      {/* 增强的删除确认对话框 */}
+      <DeleteCategoryDialog
+        isOpen={deleteDialog.isOpen}
+        originId={deleteDialog.originId}
+        categoryName={deleteDialog.categoryName}
+        contentInfo={deleteDialog.contentInfo || { promptCount: 0, subcategoryCount: 0, totalSize: 0, isEmpty: true, hasPrompts: false, hasSubcategories: false }}
+        onConfirm={(options) => handleDeleteConfirm(deleteDialog.categoryPath, options)}
+        onCancel={handleDeleteCancel}
+        onClosed={handleDeleteClosed}
+      />
     </>
   );
 }
@@ -565,9 +740,11 @@ interface CategoryItemProps {
   selectedPath: string | null;
   onSelect: (path: string) => void;
   onRename?: (path: string, newName: string) => Promise<void>;
-  onDelete?: (categoryPath: string, categoryName: string, hasContent: boolean) => void;
+  onDelete?: (categoryPath: string, categoryName: string, hasContent: boolean, originId: string) => void;
   onCreateSubCategory?: (parentPath: string) => void;
   onNewPrompt?: (categoryPath: string) => void;
+  onMove?: (categoryPath: string, targetParentPath: string) => void;
+  rootPath?: string;
   level?: number;
   isCreatingCategory?: boolean;
   newCategoryParent?: string | null;
@@ -588,6 +765,8 @@ function CategoryItem({
   onDelete, 
   onCreateSubCategory,
   onNewPrompt,
+  onMove,
+  rootPath,
   level = 0,
   isCreatingCategory,
   newCategoryParent,
@@ -603,9 +782,29 @@ function CategoryItem({
   const [isRenaming, setIsRenaming] = useState(false);
   const [renamingValue, setRenamingValue] = useState(category.name);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
+  const [isDragOver, setIsDragOver] = useState(false);
   const renameInputRef = useRef<HTMLInputElement>(null);
   const isSelected = selectedPath === category.path;
   const hasChildren = category.children.length > 0;
+
+  // 全局拖拽结束监听器，确保拖拽状态被清除
+  useEffect(() => {
+    const handleDragEnd = () => {
+      setIsDragOver(false);
+    };
+
+    const handleDrop = () => {
+      setIsDragOver(false);
+    };
+
+    document.addEventListener('dragend', handleDragEnd);
+    document.addEventListener('drop', handleDrop);
+
+    return () => {
+      document.removeEventListener('dragend', handleDragEnd);
+      document.removeEventListener('drop', handleDrop);
+    };
+  }, []);
 
   // 自动聚焦到重命名输入框
   useEffect(() => {
@@ -697,7 +896,8 @@ function CategoryItem({
     setContextMenu(null);
     const hasContent = totalPromptCount > 0 || hasChildren;
     if (onDelete) {
-      onDelete(category.path, category.name, hasContent);
+      const originId = `category-row-${category.path.replace(/[^a-zA-Z0-9_-]/g, '_')}`;
+      onDelete(category.path, category.name, hasContent, originId);
     }
   };
 
@@ -715,12 +915,81 @@ function CategoryItem({
     }
   };
 
+  const normalizeForCompare = (p: string) => p.replace(/\\/g, '/');
+
+  const handleDragStart = (e: React.DragEvent) => {
+    if (isRenaming) return;
+    e.dataTransfer.setData('text/plain', category.path);
+    e.dataTransfer.effectAllowed = 'move';
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation(); // 防止事件冒泡
+    setIsDragOver(true);
+    e.dataTransfer.dropEffect = 'move';
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation(); // 防止事件冒泡
+    // 只有当鼠标真正离开当前元素时才清除状态
+    const rect = e.currentTarget.getBoundingClientRect();
+    const x = e.clientX;
+    const y = e.clientY;
+    
+    if (x < rect.left || x > rect.right || y < rect.top || y > rect.bottom) {
+      setIsDragOver(false);
+    }
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragOver(false); // 立即清除拖拽状态
+
+    const sourcePath = e.dataTransfer.getData('text/plain');
+    if (!sourcePath || !onMove) return;
+
+    // 优化的路径标准化
+    const normalizePath = (p: string) => p.replace(/\\/g, '/').replace(/\/+$/, '');
+    
+    const source = normalizePath(sourcePath);
+    const target = normalizePath(category.path);
+    
+    // 计算源的父目录
+    const sourceParent = source.substring(0, source.lastIndexOf('/')) || normalizePath(rootPath || '');
+
+    // 前端拦截无效操作
+    if (sourceParent === target) return; // 相同位置
+    if (source === target) return; // 拖拽到自己
+    if (target.startsWith(source + '/')) { // 拖拽到子目录
+      showToast?.('无法将分类移动到其子分类中', 'warning');
+      return;
+    }
+
+    onMove(sourcePath, category.path);
+  };
+
+  const handleMoveToRoot = () => {
+    if (!onMove || !rootPath) return;
+    const source = normalizeForCompare(category.path);
+    const targetParent = normalizeForCompare(rootPath);
+    if (source === targetParent) {
+      showToast?.('已在根目录', 'info');
+      return;
+    }
+    if (targetParent.startsWith(source + '/')) {
+      showToast?.('无法移动到自身子分类中', 'warning');
+      return;
+    }
+    onMove(category.path, rootPath);
+  };
+
   // 根据层级和状态确定文件夹图标颜色
   const getFolderColor = () => {
-    if (isSelected) return 'text-primary';
-    if (hasChildren && isExpanded) return 'text-blue-400';
-    if (hasChildren) return 'text-muted-foreground';
-    return 'text-muted-foreground';
+    if (isSelected) return 'notion-sidebar-folder active';
+    return 'notion-sidebar-folder';
   };
 
   const getFolderIcon = () => {
@@ -736,15 +1005,20 @@ function CategoryItem({
   return (
     <div>
       <div
+        id={`category-row-${category.path.replace(/[^a-zA-Z0-9_-]/g, '_')}`}
         onClick={handleSelectCategory}
         onDoubleClick={handleDoubleClick}
         onContextMenu={handleContextMenu}
-        className={`group flex items-center justify-between px-2 py-1.5 text-sm rounded-md cursor-pointer transition-all duration-150 ${
-          isSelected
-            ? 'bg-primary/10 text-foreground font-medium border-l-2 border-primary'
-            : 'text-muted-foreground hover:bg-accent hover:text-foreground'
-        } ${isRenaming ? 'bg-accent' : ''}`}
+        draggable
+        onDragStart={handleDragStart}
+        onDragOver={handleDragOver}
+        onDragLeave={handleDragLeave}
+        onDrop={handleDrop}
+        className={`group flex items-center justify-between px-2 py-1.5 text-sm rounded-md cursor-pointer notion-sidebar-item ${
+          isSelected ? 'active' : ''
+        } ${isRenaming ? 'bg-accent' : ''} ${isDragOver ? 'ring-2 ring-primary/30 bg-accent' : ''}`}
         style={{ paddingLeft: `${8 + level * 16}px` }}
+        data-tauri-drag-region={false}
       >
         <div className="flex items-center gap-2 flex-1 min-w-0">
           {/* 展开/折叠箭头 */}
@@ -754,9 +1028,9 @@ function CategoryItem({
           >
             {hasChildren ? (
               isExpanded ? (
-                <ChevronDown size={12} className="text-muted-foreground" />
+                <ChevronDown size={12} className="notion-sidebar-text-muted" />
               ) : (
-                <ChevronRight size={12} className="text-muted-foreground" />
+                <ChevronRight size={12} className="notion-sidebar-text-muted" />
               )
             ) : (
               <div className="w-3" /> // 占位符，保持对齐
@@ -775,7 +1049,7 @@ function CategoryItem({
               onChange={(e) => setRenamingValue(e.target.value)}
               onKeyDown={handleRenameKeyDown}
               onBlur={handleRename}
-              className="flex-1 bg-transparent text-foreground outline-none border-b border-border focus:border-primary px-1"
+              className="flex-1 bg-transparent notion-sidebar-text-primary outline-none border-b border-border focus:border-primary px-1"
             />
           ) : (
             <span className="truncate select-none">{category.name}</span>
@@ -786,7 +1060,7 @@ function CategoryItem({
         {!isRenaming && (
           <div className="flex items-center gap-1">
             {totalPromptCount > 0 && (
-              <span className="text-xs text-muted-foreground group-hover:text-foreground px-1.5 py-0.5 bg-muted rounded">
+              <span className="text-xs notion-sidebar-text-muted px-1.5 py-0.5 bg-muted rounded">
                 {totalPromptCount}
               </span>
             )}
@@ -798,7 +1072,7 @@ function CategoryItem({
               className="opacity-0 group-hover:opacity-100 p-1 hover:bg-accent rounded transition-all"
               title="新建子分类"
             >
-              <Plus size={12} className="text-muted-foreground" />
+              <Plus size={12} className="notion-sidebar-text-muted" />
             </button>
           </div>
         )}
@@ -811,7 +1085,7 @@ function CategoryItem({
           style={{ paddingLeft: `${8 + (level + 1) * 16}px` }}
         >
           <div className="w-4" /> {/* 箭头占位 */}
-          <Folder size={16} className="text-muted-foreground flex-shrink-0" />
+          <Folder size={16} className="notion-sidebar-folder flex-shrink-0" />
           <input
             ref={newCategoryInputRef}
             type="text"
@@ -820,7 +1094,7 @@ function CategoryItem({
             onKeyDown={onNewCategoryKeyDown}
             onBlur={onCreateCategory}
             placeholder="输入分类名称..."
-            className="flex-1 bg-transparent text-foreground placeholder:text-muted-foreground outline-none"
+            className="flex-1 bg-transparent notion-sidebar-text-primary placeholder:notion-sidebar-text-muted outline-none"
           />
         </div>
       )}
@@ -863,6 +1137,7 @@ function CategoryItem({
           onDelete={handleDelete}
           onNewSubCategory={handleNewSubCategory}
           onNewPrompt={handleNewPrompt}
+          onMoveToRoot={handleMoveToRoot}
         />
       )}
     </div>

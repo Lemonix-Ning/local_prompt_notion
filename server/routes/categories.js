@@ -9,6 +9,7 @@ const {
   scanDirectory,
   createCategory,
   renameCategory,
+  moveCategory,
   deleteCategory,
   isPathSafe,
 } = require('../utils/fileSystem');
@@ -28,6 +29,56 @@ router.get('/', async (req, res, next) => {
       data: categories,
     });
   } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * PUT /api/categories/move
+ * 移动分类到新的父目录（拖拽改变归属）
+ * Body: { categoryPath, targetParentPath }
+ */
+router.put('/move', async (req, res, next) => {
+  try {
+    const { categoryPath, targetParentPath } = req.body;
+
+    if (!categoryPath || !targetParentPath) {
+      return res.status(400).json({
+        success: false,
+        error: 'Category path and target parent path are required',
+      });
+    }
+
+    if (!isPathSafe(categoryPath, VAULT_ROOT) || !isPathSafe(targetParentPath, VAULT_ROOT)) {
+      return res.status(403).json({
+        success: false,
+        error: 'Invalid path',
+      });
+    }
+
+    if (categoryPath === VAULT_ROOT) {
+      return res.status(403).json({
+        success: false,
+        error: 'Cannot move vault root',
+      });
+    }
+
+    // 给 Vite 文件监视器时间来释放文件锁
+    await new Promise(resolve => setTimeout(resolve, 500));
+
+    const moved = await moveCategory(categoryPath, targetParentPath, VAULT_ROOT);
+
+    res.json({
+      success: true,
+      data: moved,
+    });
+  } catch (error) {
+    if (error.message && (error.message.includes('already exists') || error.message.includes('Cannot move'))) {
+      return res.status(409).json({
+        success: false,
+        error: error.message,
+      });
+    }
     next(error);
   }
 });

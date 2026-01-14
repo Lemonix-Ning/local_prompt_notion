@@ -154,6 +154,16 @@ export class ApiFileSystemAdapter implements IFileSystemAdapter {
     }
   }
 
+  async moveCategory(categoryPath: string, targetParentPath: string): Promise<{ name: string; path: string; usedFallback?: boolean }> {
+    const response = await api.categories.move(categoryPath, targetParentPath);
+
+    if (!response.success) {
+      throw new Error(response.error || 'Failed to move category');
+    }
+
+    return response.data;
+  }
+
   async deleteCategory(categoryPath: string): Promise<void> {
     const response = await api.categories.delete(categoryPath);
 

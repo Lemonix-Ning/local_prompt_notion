@@ -38,7 +38,14 @@ async function movePrompt(promptPath, newCategoryPath, vaultRoot) {
 
   const moved = await readPrompt(candidate);
   moved.meta.category_path = newCategoryPath;
-  moved.meta.category = path.basename(newCategoryPath);
+  
+  // 如果移动到根目录，category 应该为空字符串
+  if (path.normalize(newCategoryPath) === path.normalize(vaultRoot)) {
+    moved.meta.category = '';
+  } else {
+    moved.meta.category = path.basename(newCategoryPath);
+  }
+  
   await writePrompt(candidate, moved);
   return moved;
 }
@@ -83,7 +90,11 @@ async function scanDirectory(dirPath, rootPath) {
         const fullPath = path.join(dirPath, entry.name);
         const hasMeta = await exists(path.join(fullPath, 'meta.json'));
 
-        if (!hasMeta) {
+        if (hasMeta) {
+          // 这是一个提示词目录，但在根目录扫描时我们不在这里处理
+          // 提示词会在 loadPromptsInDirectory 中处理
+          continue;
+        } else {
           // 这是一个分类文件夹
           const categoryNode = {
             name: entry.name,
@@ -296,24 +307,35 @@ async function restorePrompt(promptPath, vaultRoot) {
     const metaContent = await fs.readFile(metaPath, 'utf-8');
     const meta = JSON.parse(metaContent);
     
+    console.log(`[RESTORE] Restoring prompt: ${path.basename(promptPath)}`);
+    console.log(`[RESTORE] Original path: ${meta.original_path}`);
+    console.log(`[RESTORE] Original category: ${meta.original_category}`);
+    
+    // 优先使用保存的原始路径，但只有当原始分类仍然存在时
     if (meta.original_path && await exists(path.dirname(meta.original_path))) {
-      // 使用保存的原始路径
+      console.log(`[RESTORE] Original directory exists, restoring to original location`);
       const trashItemName = path.basename(promptPath);
       const originalName = trashItemName.replace(/_\d+$/, '');
       const originalDir = path.dirname(meta.original_path);
       targetPath = path.join(originalDir, originalName);
-    } else {
-      const categoryPath = meta.category_path;
-      const category = meta.category || 'Coding';
+    } else if (meta.original_category_path && await exists(meta.original_category_path)) {
+      // 如果原始分类路径存在，恢复到那里
+      console.log(`[RESTORE] Original category exists, restoring to: ${meta.original_category_path}`);
       const trashItemName = path.basename(promptPath);
       const originalName = trashItemName.replace(/_\d+$/, '');
-      if (categoryPath && await exists(categoryPath) && isPathSafe(categoryPath, vaultRoot)) {
-        targetPath = path.join(categoryPath, originalName);
-      } else {
-        const categoriesPath = path.join(vaultRoot, category);
-        await fs.mkdir(categoriesPath, { recursive: true });
-        targetPath = path.join(categoriesPath, originalName);
-      }
+      targetPath = path.join(meta.original_category_path, originalName);
+    } else {
+      // 原始分类不存在，恢复到根目录（这样在"全部"中就能看到）
+      console.log(`[RESTORE] Original category not found, restoring to vault root`);
+      const trashItemName = path.basename(promptPath);
+      const originalName = trashItemName.replace(/_\d+$/, '');
+      targetPath = path.join(vaultRoot, originalName);
+      
+      // 更新元数据中的分类信息 - 清空分类，表示在根目录
+      meta.category = '';
+      meta.category_path = vaultRoot;
+      
+      console.log(`[RESTORE] Will restore to vault root: ${targetPath}`);
     }
     
     // 如果目标路径已存在，添加后缀
@@ -326,14 +348,24 @@ async function restorePrompt(promptPath, vaultRoot) {
       counter++;
     }
     
-    // 清除 original_path 字段
+    // 清除恢复相关的临时字段
     delete meta.original_path;
+    delete meta.original_category;
+    delete meta.original_category_path;
+    
+    // 更新时间戳
+    meta.updated_at = new Date().toISOString();
+    
+    // 写入更新后的元数据
     await fs.writeFile(metaPath, JSON.stringify(meta, null, 2), 'utf-8');
     
+    // 移动文件
     await fs.rename(promptPath, finalPath);
+    
+    console.log(`[RESTORE] Prompt restored successfully to: ${finalPath}`);
     return finalPath;
   } catch (error) {
-    console.error('恢复提示词失败:', error);
+    console.error('[RESTORE] 恢复提示词失败:', error);
     throw error;
   }
 }
@@ -485,16 +517,181 @@ async function renameCategory(categoryPath, newName) {
 }
 
 /**
+ * 移动分类到新的父目录下（用于拖拽改变归属）
+ */
+async function moveCategory(categoryPath, targetParentPath, vaultRoot) {
+  if (!(await exists(categoryPath))) {
+    throw new Error('Not found');
+  }
+
+  if (!isPathSafe(categoryPath, vaultRoot)) {
+    throw new Error('Invalid category path');
+  }
+
+  if (!isPathSafe(targetParentPath, vaultRoot)) {
+    throw new Error('Invalid target parent path');
+  }
+
+  // 禁止移动到自身或自身子目录下
+  const normalizedSource = path.normalize(categoryPath);
+  const normalizedTargetParent = path.normalize(targetParentPath);
+  if (normalizedTargetParent === normalizedSource || normalizedTargetParent.startsWith(normalizedSource + path.sep)) {
+    throw new Error('Cannot move category into itself');
+  }
+
+  // 检查是否移动到相同的父目录（即实际上没有移动）
+  const sourceParent = path.normalize(path.dirname(categoryPath));
+  if (sourceParent === normalizedTargetParent) {
+    // 相同位置，不执行任何操作，直接返回原始信息
+    const name = path.basename(categoryPath);
+    return { name, path: categoryPath, usedFallback: false };
+  }
+
+  const name = path.basename(categoryPath);
+  let destPath = path.join(targetParentPath, name);
+  let counter = 1;
+  while (await exists(destPath)) {
+    destPath = path.join(targetParentPath, `${name}_moved_${counter}`);
+    counter++;
+  }
+
+  let usedFallback = false;
+  try {
+    // 尝试重命名 (最快)
+    await fs.rename(categoryPath, destPath);
+  } catch (error) {
+    if (error.code === 'EPERM' || error.code === 'EBUSY') {
+      usedFallback = true;
+      
+      // 🔥🔥🔥 优化：使用 Node 原生 fs.cp (Node 16.7+)
+      // 相比手写的递归复制，性能提升显著
+      await fs.cp(categoryPath, destPath, { 
+        recursive: true, 
+        force: true,
+        preserveTimestamps: true // 保留时间戳
+      });
+
+      // 稍微等待一下确保句柄释放 (Windows 特性)
+      await new Promise(r => setTimeout(r, 50)); 
+
+      // 使用原生 fs.rm 删除源目录 (Node 14.14+)
+      await fs.rm(categoryPath, { recursive: true, force: true });
+    } else {
+      throw error;
+    }
+  }
+
+  // 🔥🔥🔥 性能优化：跳过元数据更新
+  // 元数据将在下次 vault 扫描时自动修正，避免大量 I/O 操作
+  console.log('[MOVE] Skipping metadata normalization for performance - will be corrected on next vault scan');
+
+  return { name, path: destPath, usedFallback };
+}
+
+/**
+ * 递归处理分类内的提示词，为删除做准备
+ */
+async function preparePromptsForCategoryDeletion(categoryPath, vaultRoot) {
+  const prompts = [];
+  
+  async function collectPrompts(dirPath) {
+    try {
+      const entries = await fs.readdir(dirPath, { withFileTypes: true });
+      
+      for (const entry of entries) {
+        if (entry.isDirectory()) {
+          const fullPath = path.join(dirPath, entry.name);
+          const hasMeta = await exists(path.join(fullPath, 'meta.json'));
+          
+          if (hasMeta) {
+            // 这是一个提示词目录
+            try {
+              const prompt = await readPrompt(fullPath);
+              prompts.push(prompt);
+              
+              // 更新提示词的元数据，保存原始路径信息
+              const metaPath = path.join(fullPath, 'meta.json');
+              const meta = { ...prompt.meta };
+              meta.original_path = fullPath;
+              meta.original_category = path.basename(categoryPath);
+              meta.original_category_path = categoryPath;
+              await fs.writeFile(metaPath, JSON.stringify(meta, null, 2), 'utf-8');
+            } catch (error) {
+              console.error(`Error processing prompt at ${fullPath}:`, error);
+            }
+          } else {
+            // 这是一个子分类，递归处理
+            await collectPrompts(fullPath);
+          }
+        }
+      }
+    } catch (error) {
+      console.error(`Error collecting prompts in ${dirPath}:`, error);
+    }
+  }
+  
+  await collectPrompts(categoryPath);
+  return prompts;
+}
+
+/**
  * 删除分类(移动到 trash)
  */
 async function deleteCategory(categoryPath, vaultRoot) {
   const trashPath = path.join(vaultRoot, 'trash');
   await fs.mkdir(trashPath, { recursive: true });
 
+  // 先处理分类内的提示词，保存原始路径信息
+  console.log(`[DELETE] Preparing prompts for category deletion: ${categoryPath}`);
+  await preparePromptsForCategoryDeletion(categoryPath, vaultRoot);
+
   const categoryName = path.basename(categoryPath);
   const targetPath = path.join(trashPath, `${categoryName}_${Date.now()}`);
 
-  await fs.rename(categoryPath, targetPath);
+  let usedFallback = false;
+  try {
+    // 先尝试直接重命名
+    console.log(`[DELETE] Attempting direct rename: ${categoryPath} -> ${targetPath}`);
+    await fs.rename(categoryPath, targetPath);
+    console.log(`[DELETE] Direct rename successful`);
+  } catch (error) {
+    // 如果失败(通常是 EPERM 或 EBUSY),使用复制+删除
+    if (error.code === 'EPERM' || error.code === 'EBUSY') {
+      console.log(`[DELETE] Direct rename failed (${error.code}), using copy+delete fallback`);
+      usedFallback = true;
+      try {
+        // 复制到回收站
+        console.log(`[DELETE] Copying ${categoryPath} to ${targetPath}`);
+        await copyDirectory(categoryPath, targetPath);
+        console.log(`[DELETE] Copy successful`);
+        
+        // 等待一下,确保所有文件都写入完成
+        await new Promise(resolve => setTimeout(resolve, 100));
+        
+        // 删除原目录
+        console.log(`[DELETE] Deleting original directory ${categoryPath}`);
+        await safeRemoveDirectory(categoryPath);
+        console.log(`[DELETE] Delete successful`);
+      } catch (fallbackError) {
+        // 如果复制+删除失败,尝试回滚
+        console.error('[DELETE] Copy+delete failed:', fallbackError);
+        try {
+          if (await exists(targetPath)) {
+            console.log(`[DELETE] Rolling back - deleting ${targetPath}`);
+            await safeRemoveDirectory(targetPath);
+          }
+        } catch (rollbackError) {
+          console.error('[DELETE] Rollback failed:', rollbackError);
+        }
+        throw new Error('Failed to delete category: ' + fallbackError.message);
+      }
+    } else {
+      throw error;
+    }
+  }
+
+  console.log(`[DELETE] Category deletion completed: ${categoryName}`);
+  return { name: categoryName, path: targetPath, usedFallback };
 }
 
 /**
@@ -562,7 +759,7 @@ function collectAllPrompts(categories) {
 /**
  * 通过 ID 查找提示词路径
  */
-function findPromptPathById(categories, promptId) {
+async function findPromptPathById(categories, promptId, vaultRoot) {
   function search(nodes) {
     for (const node of nodes) {
       for (const prompt of node.prompts) {
@@ -578,7 +775,23 @@ function findPromptPathById(categories, promptId) {
     return null;
   }
 
-  return search(categories);
+  // 首先在分类中搜索
+  const categoryResult = search(categories);
+  if (categoryResult) return categoryResult;
+
+  // 如果在分类中没找到，搜索根目录
+  try {
+    const rootPrompts = await loadPromptsInDirectory(vaultRoot);
+    for (const prompt of rootPrompts) {
+      if (prompt.meta.id === promptId) {
+        return prompt.path;
+      }
+    }
+  } catch (error) {
+    console.error('Error searching root directory prompts:', error);
+  }
+
+  return null;
 }
 
 async function normalizePromptsCategoryPath(categories, vaultRoot) {
@@ -640,6 +853,7 @@ module.exports = {
   movePrompt,
   createCategory,
   renameCategory,
+  moveCategory,
   deleteCategory,
   searchPrompts,
   getAllTags,
