@@ -1,134 +1,91 @@
-/**
- * 全局样式 - 新主题系统
- */
-
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
-/* --- 浅色模式 (默认) --- */
 :root {
-  /* --- 基础背景与文字 --- */
-  --bg-main: #ffffff;           /* 主背景：纯白 */
-  --bg-sidebar: #f9fafb;        /* 侧边栏：极淡的灰 (Gray 50) */
-  --text-primary: #18181b;      /* 主要文字：接近纯黑 (Zinc 900) */
-  --text-secondary: #52525b;    /* 次要文字：深灰 (Zinc 600) */
-  --text-muted: #a1a1aa;        /* 弱化文字：浅灰 (Zinc 400) */
-  --border-color: #e4e4e7;      /* 边框颜色：淡灰 (Gray 200) */
-  
-  /* --- 交互状态 (列表项) --- */
-  --item-hover: #f3f4f6;        /* 悬停背景：Gray 100 */
-  --item-active-bg: #e0e7ff;    /* 选中背景：Indigo 50 (淡蓝紫色) */
-  --item-active-text: #4f46e5;  /* 选中文字：Indigo 600 (深蓝紫色) */
-  
-  /* --- 卡片 (Card) --- */
-  --card-bg: #ffffff;           /* 卡片背景：纯白 */
-  --card-border: #e4e4e7;       /* 卡片边框：同通用边框 */
-  --spotlight-color: rgba(0,0,0,0.02); /* 聚光灯效果：极淡的黑色阴影 */
-
-  /* --- 按钮 (Button) - 专门优化的白底风格 --- */
-  --btn-bg: #ffffff;            /* 按钮背景：白 */
-  --btn-text: #18181b;          /* 按钮文字：黑 */
-  --btn-border: #e4e4e7;        /* 按钮边框：灰描边 */
-  --btn-hover: #f4f4f5;         /* 按钮悬停：淡灰 */
-  
-  /* --- 主要按钮 (浅色模式) --- */
-  --btn-primary-bg: #6366f1;    /* 主按钮背景：蓝色 */
-  --btn-primary-text: #ffffff;  /* 主按钮文字：白色 */
-  --btn-primary-hover: #5855eb; /* 主按钮悬停：深蓝 */
-  
-  /* --- 特效控制 --- */
-  --grid-opacity: 0;            /* 网格背景：隐藏 */
-  --aurora-opacity: 0;          /* 极光背景：隐藏 */
-
-  /* --- 兼容现有 Tailwind 变量 --- */
-  --background: var(--bg-main);
-  --foreground: var(--text-primary);
+  --background: #ffffff;
+  --foreground: #0f172a;
   --muted: #f1f5f9;
-  --muted-foreground: var(--text-muted);
-  --popover: var(--card-bg);
-  --popover-foreground: var(--text-primary);
+  --muted-foreground: #64748b;
 
-  /* --- Toast 通知系统样式 --- */
-  --toast-bg: #ffffff;
-  --toast-border: #e4e4e7;
-  --toast-text: #18181b;
-  --card: var(--card-bg);
-  --card-foreground: var(--text-primary);
-  --border: var(--border-color);
+  --popover: #ffffff;
+  --popover-foreground: #0f172a;
+  --card: #ffffff;
+  --card-foreground: #0f172a;
+  --border: #e2e8f0;
   --input: #f1f5f9;
   --primary: #6366f1;
   --primary-foreground: #ffffff;
   --secondary: #f1f5f9;
-  --secondary-foreground: var(--text-primary);
-  --accent: var(--item-hover);
-  --accent-foreground: var(--text-primary);
+  --secondary-foreground: #0f172a;
+  --accent: #f1f5f9;
+  --accent-foreground: #0f172a;
   --destructive: #ef4444;
   --destructive-foreground: #ffffff;
   --ring: #6366f1;
   --radius: 0.5rem;
+
+  --btn-bg: #ffffff;
+  --btn-text: #334155;
+  --btn-border: #e5e7eb;
+  --btn-hover-shadow: 0 1px 2px rgba(15, 23, 42, 0.08);
+  --btn-disabled-opacity: 0.55;
+
+  --create-bg: #0f172a;
+  --create-fg: #ffffff;
+  --create-hover-bg: #1e293b;
+  --create-soft-bg: rgba(15, 23, 42, 0.08);
+
+  --create-accent: #334155;
+
+  /* Notion 风格浅色模式专用变量 */
+  --sidebar-bg: #f1f5f9;
+  --sidebar-item-hover: #f3f4f6;
+  --sidebar-item-active-bg: #e0e7ff;
+  --sidebar-item-active-text: #4f46e5;
+  --sidebar-item-active-border: #4f46e5;
+  --sidebar-text-primary: #18181b;
+  --sidebar-text-secondary: #52525b;
+  --sidebar-text-muted: #a1a1aa;
+  --sidebar-border: #e4e4e7;
+  --sidebar-folder-color: #6b7280;
+  --sidebar-folder-active-color: #4f46e5;
 }
 
-/* --- 深色模式覆盖 --- */
 :root.dark {
-  /* --- 基础背景与文字 --- */
-  --bg-main: #09090b;           /* 主背景：接近纯黑 */
-  --bg-sidebar: #18181b;        /* 侧边栏：深灰 */
-  --text-primary: #e4e4e7;      /* 主要文字：浅灰 */
-  --text-secondary: #a1a1aa;    /* 次要文字：中灰 */
-  --text-muted: #71717a;        /* 弱化文字：深灰 */
-  --border-color: rgba(255, 255, 255, 0.1); /* 边框：半透明白 */
-  
-  /* --- 交互状态 --- */
-  --item-hover: #27272a;        /* 悬停背景：深灰 */
-  --item-active-bg: #312e81;    /* 选中背景：深蓝紫 */
-  --item-active-text: #a5b4fc;  /* 选中文字：浅蓝紫 */
-  
-  /* --- 卡片 --- */
-  --card-bg: #18181b;           /* 卡片背景：深灰 */
-  --card-border: rgba(255, 255, 255, 0.1); /* 卡片边框 */
-  --spotlight-color: rgba(255,255,255,0.06); /* 聚光灯效果 */
-
-  /* --- 按钮 (深色模式保持高对比) --- */
-  --btn-bg: #ffffff;            /* 按钮背景：白 */
-  --btn-text: #000000;          /* 按钮文字：黑 */
-  --btn-border: transparent;    /* 按钮边框：无 */
-  --btn-hover: #f4f4f5;         /* 按钮悬停：淡灰 */
-  
-  /* --- 主要按钮 (深色模式) --- */
-  --btn-primary-bg: #18181b;    /* 主按钮背景：深色 */
-  --btn-primary-text: #ffffff;  /* 主按钮文字：白色 */
-  --btn-primary-hover: #27272a; /* 主按钮悬停：稍浅 */
-  
-  /* --- 特效控制 --- */
-  --grid-opacity: 1;            /* 网格背景：显示 */
-  --aurora-opacity: 1;          /* 极光背景：显示 */
-
-  /* --- Toast 通知系统样式 (深色模式) --- */
-  --toast-bg: rgba(24, 24, 27, 0.8); /* 半透明黑 */
-  --toast-border: rgba(255, 255, 255, 0.1);
-  --toast-text: #e4e4e7;
-
-  /* --- 兼容现有 Tailwind 变量 --- */
-  --background: var(--bg-main);
-  --foreground: var(--text-primary);
+  --background: #09090b;
+  --foreground: #fafafa;
   --muted: #27272a;
-  --muted-foreground: var(--text-muted);
-  --popover: var(--card-bg);
-  --popover-foreground: var(--text-primary);
-  --card: var(--card-bg);
-  --card-foreground: var(--text-primary);
-  --border: var(--border-color);
+  --muted-foreground: #a1a1aa;
+
+  --popover: #09090b;
+  --popover-foreground: #fafafa;
+  --card: #18181b;
+  --card-foreground: #fafafa;
+  --border: rgba(255, 255, 255, 0.1);
   --input: #27272a;
   --primary: #6366f1;
   --primary-foreground: #fafafa;
   --secondary: #27272a;
   --secondary-foreground: #fafafa;
-  --accent: var(--item-hover);
-  --accent-foreground: var(--text-primary);
+  --accent: #27272a;
+  --accent-foreground: #fafafa;
   --destructive: #ef4444;
   --destructive-foreground: #fafafa;
   --ring: #6366f1;
+
+  --btn-bg: #27272a;
+  --btn-text: #ffffff;
+  --btn-border: #3f3f46;
+  --btn-hover-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
+  --btn-disabled-opacity: 0.5;
+
+  --create-bg: #f8fafc;
+  --create-fg: #0f172a;
+  --create-hover-bg: #e2e8f0;
+  --create-soft-bg: rgba(248, 250, 252, 0.12);
+
+  --create-accent: #e2e8f0;
 }
 
 * {
@@ -143,6 +100,12 @@ body,
 #root {
   background-color: var(--background);
   color: var(--foreground);
+}
+
+:root:not(.dark) body,
+:root:not(.dark) #root {
+  background-image: linear-gradient(to right, #f8fafc 0%, #ffffff 55%, #ffffff 100%);
+  background-attachment: fixed;
 }
 
 select {
@@ -161,8 +124,8 @@ body {
     sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  background-color: var(--bg-main);
-  color: var(--text-primary);
+  background-color: var(--background);
+  color: var(--foreground);
   transition: background-color 0.3s ease, color 0.3s ease;
 }
 
@@ -171,38 +134,7 @@ code {
     monospace;
 }
 
-/* --- 主题感知的实用类 --- */
-.theme-active { 
-  background-color: var(--item-active-bg); 
-  color: var(--item-active-text); 
-}
-
-.theme-hover:hover { 
-  background-color: var(--item-hover); 
-  color: var(--text-primary); 
-}
-
-.theme-button {
-  background-color: var(--btn-bg);
-  color: var(--btn-text);
-  border: 1px solid var(--btn-border);
-}
-
-.theme-button:hover {
-  background-color: var(--btn-hover);
-}
-
-.theme-button-primary {
-  background-color: var(--btn-primary-bg);
-  color: var(--btn-primary-text);
-  border: 1px solid transparent;
-}
-
-.theme-button-primary:hover {
-  background-color: var(--btn-primary-hover);
-}
-
-/* --- 自定义滚动条 --- */
+/* Custom scrollbar */
 ::-webkit-scrollbar {
   width: 8px;
   height: 8px;
@@ -221,7 +153,7 @@ code {
   background: rgba(0, 0, 0, 0.22);
 }
 
-/* 深色模式滚动条 */
+/* Dark mode scrollbar */
 :root.dark ::-webkit-scrollbar-track {
   background: rgba(255, 255, 255, 0.04);
 }
@@ -234,46 +166,38 @@ code {
   background: rgba(255, 255, 255, 0.22);
 }
 
-/* --- 网格背景 --- */
+/* Grid background for dark mode only */
 .bg-grid {
   background-size: 40px 40px;
   mask-image: linear-gradient(to bottom, black 40%, transparent 100%);
-}
-
-/* 默认浅色模式网格 - 隐藏 */
-.bg-grid {
   opacity: 0;
-  background-image: 
-    linear-gradient(to right, rgba(0, 0, 0, 0.03) 1px, transparent 1px),
-    linear-gradient(to bottom, rgba(0, 0, 0, 0.03) 1px, transparent 1px);
 }
 
-/* 深色模式网格 - 显示 */
 :root.dark .bg-grid {
   opacity: 0.2;
-  background-image: 
+  background-image:
     linear-gradient(to right, rgba(255, 255, 255, 0.03) 1px, transparent 1px),
     linear-gradient(to bottom, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
 }
 
-/* --- 极光背景 --- */
-.aurora-bg {
-  background:
-    radial-gradient(circle at 15% 50%, rgba(79, 70, 229, 0.04) 0%, transparent 40%),
-    radial-gradient(circle at 85% 30%, rgba(236, 72, 153, 0.04) 0%, transparent 40%);
-}
-
-/* 默认浅色模式极光 - 隐藏 */
+/* Aurora background for dark mode only */
 .aurora-bg {
   opacity: 0;
 }
 
-/* 深色模式极光 - 显示 */
 :root.dark .aurora-bg {
   opacity: 1;
   background:
     radial-gradient(circle at 15% 50%, rgba(79, 70, 229, 0.08) 0%, transparent 40%),
     radial-gradient(circle at 85% 30%, rgba(236, 72, 153, 0.08) 0%, transparent 40%);
+}
+
+:root:not(.dark) .aurora-bg {
+  opacity: 1;
+  background:
+    radial-gradient(circle at 12% 45%, rgba(59, 130, 246, 0.08) 0%, transparent 42%),
+    radial-gradient(circle at 78% 22%, rgba(168, 85, 247, 0.07) 0%, transparent 45%);
+  filter: blur(16px);
 }
 
 .no-scrollbar::-webkit-scrollbar {
@@ -383,7 +307,8 @@ code {
 .prose a:hover {
   opacity: 0.8;
 }
-/* --- Toast 通知系统动画 --- */
+
+/* Toast animations */
 @keyframes slideIn {
   from {
     opacity: 0;
@@ -408,7 +333,132 @@ code {
   animation: slideIn 0.3s ease-out;
 }
 
-/* Toast 进度条动画 */
 .animate-shrink {
   animation: shrink 3s linear forwards;
+}
+
+/* Notion 风格侧边栏样式 */
+.notion-sidebar {
+  background-color: var(--sidebar-bg);
+}
+
+:root:not(.dark) .notion-sidebar {
+  background-image: linear-gradient(to bottom, rgba(255, 255, 255, 0.65), rgba(255, 255, 255, 0));
+  box-shadow: inset -1px 0 0 rgba(15, 23, 42, 0.04);
+}
+
+.notion-sidebar-item {
+  color: var(--sidebar-text-secondary);
+  transition: all 0.15s ease;
+}
+
+.notion-sidebar-item:hover {
+  background-color: var(--sidebar-item-hover);
+  color: var(--sidebar-text-primary);
+}
+
+.notion-sidebar-item.active {
+  background-color: var(--sidebar-item-active-bg);
+  color: var(--sidebar-item-active-text);
+  font-weight: 500;
+  border-left: 2px solid var(--sidebar-item-active-border);
+}
+
+.notion-sidebar-folder {
+  color: var(--sidebar-folder-color);
+}
+
+.notion-sidebar-folder.active {
+  color: var(--sidebar-folder-active-color);
+}
+
+.notion-sidebar-text-primary {
+  color: var(--sidebar-text-primary);
+}
+
+.notion-sidebar-text-muted {
+  color: var(--sidebar-text-muted);
+}
+
+/* 深色模式下保持原有样式 */
+:root.dark .notion-sidebar {
+  background-color: rgba(0, 0, 0, 0.2);
+}
+
+:root.dark .notion-sidebar-item {
+  color: #a1a1aa;
+}
+
+:root.dark .notion-sidebar-item:hover {
+  background-color: #27272a;
+  color: #fafafa;
+}
+
+:root.dark .notion-sidebar-item.active {
+  background-color: rgba(99, 102, 241, 0.1);
+  color: #6366f1;
+  border-left-color: #6366f1;
+}
+
+:root.dark .notion-sidebar-folder {
+  color: #a1a1aa;
+}
+
+:root.dark .notion-sidebar-folder.active {
+  color: #6366f1;
+}
+
+:root.dark .notion-sidebar-text-primary {
+  color: #fafafa;
+}
+
+:root.dark .notion-sidebar-text-muted {
+  color: #71717a;
+}
+
+.btn-create {
+  background-color: var(--btn-bg);
+  color: var(--btn-text);
+  border: 1px solid var(--btn-border);
+}
+
+.btn-create:hover {
+  box-shadow: var(--btn-hover-shadow);
+}
+
+.btn {
+  background-color: var(--btn-bg);
+  color: var(--btn-text);
+  border: 1px solid var(--btn-border);
+}
+
+.btn:hover {
+  box-shadow: var(--btn-hover-shadow);
+}
+
+.btn:disabled {
+  opacity: var(--btn-disabled-opacity);
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+.btn-ghost {
+  background-color: transparent;
+  border-color: transparent;
+}
+
+.btn-ghost:hover {
+  box-shadow: none;
+}
+
+.create-soft-bg {
+  background-color: var(--create-soft-bg);
+}
+
+.create-accent-text {
+  color: var(--create-accent);
+}
+
+.create-accent-bar {
+  background-color: var(--create-accent);
 }
