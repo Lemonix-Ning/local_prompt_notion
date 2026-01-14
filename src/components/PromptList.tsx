@@ -9,6 +9,8 @@ import {
   Star,
   Trash2,
   X,
+  Folder,
+  FolderOpen,
   RotateCcw,
   Search,
   Minus,
@@ -21,10 +23,12 @@ import { useApp } from '../AppContext';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 // EditorPage 现在通过 EditorOverlay 系统使用，不再直接导入
 import api from '../api/client';
-import { getSmartGradient, getSmartIcon } from '../utils/smartIcon';
-import { getTagStyle } from '../utils/tagColors';
+import { getSmartIcon } from '../utils/smartIcon';
+import { getIconGradientConfig, getTagStyle } from '../utils/tagColors';
 import { useToast } from '../contexts/ToastContext';
 import { useConfirm } from '../contexts/ConfirmContext';
+import { Button } from './Button';
+import { NewPromptOverlay } from './NewPromptOverlay';
 
 function SpotlightCard({
   children,
@@ -75,14 +79,18 @@ const getTagColor = (tag: string) => {
 };
 
 export function PromptList() {
-  const { state, dispatch, getFilteredPrompts, createPrompt, savePrompt, deletePrompt, restorePrompt } = useApp();
+  const { state, dispatch, getFilteredPrompts, createPrompt, savePrompt, deletePrompt, restorePrompt, createCategory } = useApp();
   const { searchQuery, selectedCategory, uiState } = state;
   const { showToast } = useToast();
   const { confirm } = useConfirm();
+  const newPromptDraftKey = 'newPromptDraft';
   const [isSwitchingList, setIsSwitchingList] = useState(false);
   const [isCategoryOpen, setIsCategoryOpen] = useState(false);
   const [categoryQuery, setCategoryQuery] = useState('');
   const categoryPopoverRef = useRef<HTMLDivElement | null>(null);
+  const [dropdownCreatingParentPath, setDropdownCreatingParentPath] = useState<string | null>(null);
+  const [dropdownNewCategoryName, setDropdownNewCategoryName] = useState('');
+  const dropdownNewCategoryInputRef = useRef<HTMLInputElement | null>(null);
   const [newPrompt, setNewPrompt] = useState({ 
     title: '', 
     content: '', 
@@ -102,12 +110,107 @@ export function PromptList() {
   const isModalOpen = uiState.newPromptModal.isOpen;
   const preselectedCategory = uiState.newPromptModal.preselectedCategory;
 
+  const [newPromptOverlayMounted, setNewPromptOverlayMounted] = useState(false);
+  const [newPromptOverlayOpen, setNewPromptOverlayOpen] = useState(false);
+
+  const getHasAnyDraftContent = (v: { title: string; content: string; category: string; tags: string }) => {
+    return Boolean(v.title.trim() || v.content.trim() || v.category.trim() || v.tags.trim());
+  };
+
+  const getIsNewPromptComplete = (v: { title: string; content: string; category: string }) => {
+    // 分类可为空（公共），所以“完成”只取决于标题 + 内容
+    return Boolean(v.title.trim() && v.content.trim());
+  };
+
+  const restoreNewPromptDraft = () => {
+    try {
+      const raw = localStorage.getItem(newPromptDraftKey);
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as { title?: string; content?: string; category?: string; tags?: string };
+      setNewPrompt((prev) => ({
+        ...prev,
+        title: typeof parsed.title === 'string' ? parsed.title : prev.title,
+        content: typeof parsed.content === 'string' ? parsed.content : prev.content,
+        category: typeof parsed.category === 'string' ? parsed.category : prev.category,
+        tags: typeof parsed.tags === 'string' ? parsed.tags : prev.tags,
+      }));
+    } catch {
+    }
+  };
+
+  const persistNewPromptDraftIfNeeded = () => {
+    const hasAny = getHasAnyDraftContent(newPrompt);
+    const complete = getIsNewPromptComplete(newPrompt);
+
+    if (!hasAny) {
+      try {
+        localStorage.removeItem(newPromptDraftKey);
+      } catch {
+      }
+      return;
+    }
+
+    if (complete) {
+      try {
+        localStorage.removeItem(newPromptDraftKey);
+      } catch {
+      }
+      return;
+    }
+
+    try {
+      localStorage.setItem(newPromptDraftKey, JSON.stringify(newPrompt));
+    } catch {
+    }
+  };
+
+  const clearNewPromptDraft = () => {
+    try {
+      localStorage.removeItem(newPromptDraftKey);
+    } catch {
+    }
+  };
+
+  const openNewPrompt = () => {
+    dispatch({ type: 'OPEN_NEW_PROMPT_MODAL' });
+    setNewPromptOverlayMounted(true);
+    setNewPromptOverlayOpen(true);
+  };
+
+  const requestCloseNewPrompt = () => {
+    persistNewPromptDraftIfNeeded();
+    setNewPromptOverlayOpen(false);
+  };
+
   useEffect(() => {
+    if (isModalOpen) {
+      restoreNewPromptDraft();
+      setNewPromptOverlayMounted(true);
+      setNewPromptOverlayOpen(true);
+      return;
+    }
+
     if (!isModalOpen) {
       setIsCategoryOpen(false);
       setCategoryQuery('');
+      setDropdownCreatingParentPath(null);
+      setDropdownNewCategoryName('');
     }
   }, [isModalOpen]);
+
+  useEffect(() => {
+    if (!isCategoryOpen) {
+      setDropdownCreatingParentPath(null);
+      setDropdownNewCategoryName('');
+    }
+  }, [isCategoryOpen]);
+
+  useEffect(() => {
+    if (isCategoryOpen && dropdownCreatingParentPath && dropdownNewCategoryInputRef.current) {
+      dropdownNewCategoryInputRef.current.focus();
+      dropdownNewCategoryInputRef.current.select();
+    }
+  }, [isCategoryOpen, dropdownCreatingParentPath]);
 
   // 处理预选分类
   useEffect(() => {
@@ -343,6 +446,50 @@ export function PromptList() {
     ? allFlatCategories.filter((c) => c.name.toLowerCase().includes(categoryQuery.toLowerCase()))
     : allFlatCategories;
 
+  const handleStartCreateSubCategoryFromDropdown = (parentPath: string) => {
+    setDropdownCreatingParentPath(parentPath);
+    setDropdownNewCategoryName('');
+  };
+
+  const handleCancelCreateSubCategoryFromDropdown = () => {
+    setDropdownCreatingParentPath(null);
+    setDropdownNewCategoryName('');
+  };
+
+  const handleSubmitCreateSubCategoryFromDropdown = async () => {
+    const name = dropdownNewCategoryName.trim();
+    const parentPath = dropdownCreatingParentPath;
+    if (!name || !parentPath) {
+      handleCancelCreateSubCategoryFromDropdown();
+      return;
+    }
+    if (!state.fileSystem) {
+      showToast('尚未加载 Vault，无法创建分类', 'warning');
+      return;
+    }
+
+    try {
+      await createCategory(parentPath, name);
+      setNewPrompt((prev) => ({ ...prev, category: name }));
+      handleCancelCreateSubCategoryFromDropdown();
+      setIsCategoryOpen(false);
+      setCategoryQuery('');
+      showToast('分类创建成功', 'success');
+    } catch (error) {
+      showToast(`创建分类失败: ${(error as Error).message}`, 'error');
+    }
+  };
+
+  const handleDropdownNewCategoryKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      handleSubmitCreateSubCategoryFromDropdown();
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      handleCancelCreateSubCategoryFromDropdown();
+    }
+  };
+
   // 单击进入编辑页面 - 使用动画覆盖层
   const handleCardClick = (promptId: string) => {
     const originCardId = `prompt-card-${promptId}`;
@@ -426,8 +573,8 @@ export function PromptList() {
   };
 
   const handleAddPrompt = async () => {
-    if (!newPrompt.title || !newPrompt.content || !newPrompt.category) {
-      showToast("请填写标题、分类和内容", 'warning');
+    if (!newPrompt.title || !newPrompt.content) {
+      showToast("请填写标题和内容", 'warning');
       return;
     }
 
@@ -444,19 +591,44 @@ export function PromptList() {
         }
         return null;
       };
-      
-      if (state.fileSystem?.categories) {
-        categoryPath = findCategoryPath(state.fileSystem.categories, newPrompt.category) || '';
+
+      if (newPrompt.category) {
+        if (state.fileSystem?.categories) {
+          categoryPath = findCategoryPath(state.fileSystem.categories, newPrompt.category) || '';
+        }
+
+        if (!categoryPath) {
+          showToast("找不到指定的分类", 'error');
+          return;
+        }
+      } else {
+        // 公共（根目录）
+        categoryPath = state.fileSystem?.root || '';
+        if (!categoryPath) {
+          showToast('尚未加载 Vault，无法创建', 'warning');
+          return;
+        }
       }
-      
-      if (!categoryPath) {
-        showToast("找不到指定的分类", 'error');
-        return;
-      }
+
+      const normalizeTagKey = (t: string) => t.trim().toLowerCase();
+      const dedupeTags = (arr: string[]) => {
+        const seen = new Set<string>();
+        const out: string[] = [];
+        for (const raw of arr) {
+          const v = (raw || '').trim();
+          if (!v) continue;
+          const key = normalizeTagKey(v);
+          if (seen.has(key)) continue;
+          seen.add(key);
+          out.push(v);
+        }
+        return out;
+      };
 
       // 准备标签(分类标签 + 用户标签)
       const userTags = newPrompt.tags ? newPrompt.tags.split(',').map(t => t.trim()).filter(t => t) : [];
-      const allTags = [newPrompt.category, ...userTags];
+      const rawTags = [...(newPrompt.category ? [newPrompt.category] : []), ...userTags];
+      const allTags = dedupeTags(rawTags);
 
       // 创建提示词并立即更新内容和标签
       const created = await createPrompt(categoryPath, newPrompt.title);
@@ -472,9 +644,11 @@ export function PromptList() {
         }
       };
       await savePrompt(updated);
-      
+
       setNewPrompt({ title: '', content: '', category: '', tags: '' });
-      dispatch({ type: 'CLOSE_NEW_PROMPT_MODAL' });
+      clearNewPromptDraft();
+      // 创建成功：直接关闭，不走 persist（否则可能把旧值误写回草稿）
+      setNewPromptOverlayOpen(false);
       showToast("已创建新提示词", 'success');
     } catch (error) {
       showToast('创建失败: ' + (error as Error).message, 'error');
@@ -584,12 +758,13 @@ export function PromptList() {
             <div className="flex items-center gap-2 text-sm text-muted-foreground">
               <span className="font-medium text-foreground">{prompts.length}</span> 个项目
             </div>
-            <button 
-              onClick={() => dispatch({ type: 'OPEN_NEW_PROMPT_MODAL' })}
-              className="theme-button-primary px-3 py-2 rounded-lg text-sm font-medium flex items-center gap-1.5 transition-colors shadow-sm"
+            <Button
+              onClick={openNewPrompt}
+              className="btn-create px-3 py-2 rounded-lg text-sm font-medium flex items-center gap-1.5 transition-colors shadow-sm"
+              id="new-prompt-button"
             >
               <Plus size={16} /> 新建
-            </button>
+            </Button>
           </div>
 
           {/* Cards Grid */}
@@ -617,13 +792,18 @@ export function PromptList() {
                     <div className="flex items-center gap-2 mb-1.5">
                       {(() => {
                         const Icon = getSmartIcon(prompt.meta.title, prompt.meta.tags);
-                        const [from, to] = getSmartGradient(prompt.meta.title, prompt.meta.tags);
+                        const gradient = getIconGradientConfig(prompt.meta.tags);
                         return (
                           <div
-                            className={`w-9 h-9 rounded-lg bg-gradient-to-br ${from} ${to} flex items-center justify-center shadow-sm shadow-white/5 border border-white/10 flex-shrink-0`}
+                            className="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0"
+                            style={{
+                              backgroundImage: gradient.backgroundImage,
+                              border: gradient.border,
+                              boxShadow: gradient.boxShadow,
+                            }}
                             title={(prompt.meta.tags || []).join(', ')}
                           >
-                            <Icon size={18} className="text-black/90" />
+                            <Icon size={18} style={{ color: gradient.iconColor }} />
                           </div>
                         );
                       })()}
@@ -653,7 +833,7 @@ export function PromptList() {
                 </div>
 
                 {/* Card Content Preview */}
-                <div className="flex-1 bg-muted/40 rounded-lg p-2.5 text-xs text-muted-foreground font-mono overflow-y-auto border border-border mb-3 whitespace-pre-wrap leading-relaxed no-scrollbar">
+                <div className="flex-1 bg-muted/40 rounded-lg p-2.5 text-xs text-muted-foreground font-mono overflow-y-auto border-0 dark:border dark:border-border mb-3 whitespace-pre-wrap leading-relaxed no-scrollbar">
                   {prompt.content}
                 </div>
 
@@ -719,14 +899,22 @@ export function PromptList() {
       </div>
 
       {/* Add New Prompt Modal */}
-      {isModalOpen && (
-        <div className="fixed inset-0 bg-black/40 dark:bg-black/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
-          <div className="bg-background border border-border rounded-2xl shadow-2xl w-full max-w-3xl h-[80vh] flex flex-col overflow-hidden backdrop-blur-xl">
+      {newPromptOverlayMounted && (
+        <NewPromptOverlay
+          isOpen={newPromptOverlayOpen}
+          originId="new-prompt-button"
+          onRequestClose={requestCloseNewPrompt}
+          onClosed={() => {
+            dispatch({ type: 'CLOSE_NEW_PROMPT_MODAL' });
+            setNewPromptOverlayMounted(false);
+          }}
+        >
+          <div className="bg-background border border-border rounded-2xl shadow-2xl w-full h-full flex flex-col overflow-hidden backdrop-blur-xl">
             {/* Modal Header */}
             <div className="flex items-center justify-between px-6 py-4 border-b border-border bg-background">
               <div className="flex items-center gap-3">
-                <div className="w-8 h-8 bg-primary/10 rounded-lg flex items-center justify-center">
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" className="text-primary">
+                <div className="w-8 h-8 create-soft-bg rounded-lg flex items-center justify-center">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" className="create-accent-text">
                     <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
                     <polyline points="14,2 14,8 20,8" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
                     <line x1="12" y1="18" x2="12" y2="12" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
@@ -735,12 +923,15 @@ export function PromptList() {
                 </div>
                 <h2 className="text-lg font-semibold text-foreground">新建页面</h2>
               </div>
-              <button 
-                onClick={() => dispatch({ type: 'CLOSE_NEW_PROMPT_MODAL' })} 
-                className="text-muted-foreground hover:text-foreground p-2 rounded-lg hover:bg-accent transition-colors"
+              <Button
+                onClick={requestCloseNewPrompt}
+                variant="ghost"
+                size="icon"
+                className="text-muted-foreground hover:text-foreground hover:bg-accent"
+                aria-label="关闭"
               >
                 <X size={20} />
-              </button>
+              </Button>
             </div>
 
             {/* Content Area */}
@@ -764,25 +955,20 @@ export function PromptList() {
                 <div className="space-y-2">
                   <label className="text-sm font-medium text-foreground">分类位置</label>
                   <div className="relative" ref={categoryPopoverRef}>
-                    <button
-                      type="button"
+                    <Button
                       onClick={() => setIsCategoryOpen((v) => !v)}
-                      className="w-full flex items-center justify-between bg-input px-4 py-3 rounded-lg border border-border hover:bg-accent hover:border-primary/30 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/50 transition-all text-foreground group"
+                      className="w-full flex items-center justify-between bg-input px-4 py-3 rounded-lg border border-border hover:bg-accent focus:outline-none transition-all text-foreground group"
                     >
                       <div className="flex items-center gap-3 flex-1 min-w-0">
                         {newPrompt.category ? (
                           <>
-                            <div className="w-5 h-5 rounded flex items-center justify-center bg-blue-500/10 text-blue-400 flex-shrink-0">
-                              📁
-                            </div>
+                            <FolderOpen size={16} className="notion-sidebar-folder active flex-shrink-0" />
                             <span className="text-foreground truncate font-medium">{newPrompt.category}</span>
                           </>
                         ) : (
                           <>
-                            <div className="w-5 h-5 rounded flex items-center justify-center bg-muted text-muted-foreground flex-shrink-0">
-                              📂
-                            </div>
-                            <span className="text-muted-foreground">选择分类位置...</span>
+                            <Folder size={16} className="notion-sidebar-folder flex-shrink-0 opacity-70" />
+                            <span className="text-muted-foreground">公共（全部可见）</span>
                           </>
                         )}
                       </div>
@@ -791,7 +977,7 @@ export function PromptList() {
                           <path d="M4 6L8 10L12 6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
                         </svg>
                       </div>
-                    </button>
+                    </Button>
 
                     {isCategoryOpen && (
                       <div className="absolute left-0 right-0 top-full mt-2 z-[60] rounded-xl border border-border bg-background backdrop-blur-xl shadow-2xl overflow-hidden animate-fade-in">
@@ -813,6 +999,43 @@ export function PromptList() {
 
                         {/* 分类列表 */}
                         <div className="max-h-60 overflow-y-auto">
+                          {/* 公共（无分类） */}
+                          <div
+                            role="button"
+                            tabIndex={0}
+                            onClick={() => {
+                              setNewPrompt({ ...newPrompt, category: '' });
+                              setIsCategoryOpen(false);
+                              setCategoryQuery('');
+                            }}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter' || e.key === ' ') {
+                                e.preventDefault();
+                                setNewPrompt({ ...newPrompt, category: '' });
+                                setIsCategoryOpen(false);
+                                setCategoryQuery('');
+                              }
+                            }}
+                            className={`w-full text-left py-2.5 text-sm transition-all duration-200 flex items-center group relative cursor-pointer ${
+                              !newPrompt.category
+                                ? 'bg-accent text-foreground shadow-sm'
+                                : 'text-foreground hover:bg-accent hover:shadow-sm'
+                            }`}
+                            style={{ paddingLeft: '16px', paddingRight: '8px' }}
+                          >
+                            <div className={`absolute left-0 top-0 bottom-0 w-1 create-accent-bar transition-all duration-200 ${
+                              !newPrompt.category
+                                ? 'opacity-100'
+                                : 'opacity-0 group-hover:opacity-100'
+                            }`} />
+                            <div className="flex items-center gap-2 flex-1 min-w-0">
+                              <div className="flex items-center gap-2.5 flex-1 min-w-0">
+                                <Folder size={16} className={`flex-shrink-0 ${!newPrompt.category ? 'notion-sidebar-folder active' : 'notion-sidebar-folder'}`} />
+                                <span className="truncate font-medium group-hover:font-semibold transition-all">公共（全部可见）</span>
+                              </div>
+                            </div>
+                          </div>
+
                           {filteredCategories.length === 0 ? (
                             <div className="px-4 py-6 text-center">
                               <div className="text-muted-foreground text-sm">没有匹配的分类</div>
@@ -825,59 +1048,100 @@ export function PromptList() {
                               const prefix = cat.level > 0 ? '└ ' : '';
                               
                               return (
-                                <button
-                                  key={cat.path}
-                                  type="button"
-                                  onClick={() => {
-                                    setNewPrompt({ ...newPrompt, category: cat.name });
-                                    setIsCategoryOpen(false);
-                                    setCategoryQuery('');
-                                  }}
-                                  className={`w-full text-left py-2.5 text-sm transition-all duration-200 flex items-center group relative ${
-                                    newPrompt.category === cat.name
-                                      ? 'bg-accent text-foreground shadow-sm'
-                                      : 'text-foreground hover:bg-accent hover:shadow-sm'
-                                  }`}
-                                  style={{ paddingLeft: `${16 + indent}px`, paddingRight: '16px' }}
-                                >
-                                  {/* 悬停时的左侧指示条 */}
-                                  <div className={`absolute left-0 top-0 bottom-0 w-1 bg-primary transition-all duration-200 ${
-                                    newPrompt.category === cat.name 
-                                      ? 'opacity-100' 
-                                      : 'opacity-0 group-hover:opacity-100'
-                                  }`} />
-                                  
-                                  {/* 层级引导线和文件夹图标 */}
-                                  <div className="flex items-center gap-2 flex-1 min-w-0">
-                                    {cat.level > 0 && (
-                                      <span className="text-muted-foreground text-xs font-mono leading-none group-hover:text-foreground transition-colors">
-                                        {prefix}
-                                      </span>
-                                    )}
-                                    <div className="flex items-center gap-2.5 flex-1 min-w-0">
-                                      <div className={`w-4 h-4 rounded flex items-center justify-center flex-shrink-0 text-xs transition-all duration-200 ${
-                                        cat.hasChildren 
-                                          ? 'bg-blue-500/10 text-blue-400 group-hover:bg-blue-500/20 group-hover:text-blue-300' 
-                                          : 'bg-muted/50 text-muted-foreground group-hover:bg-muted group-hover:text-foreground'
-                                      }`}>
-                                        {cat.hasChildren ? '📁' : '📄'}
+                                <div key={cat.path}>
+                                  <div
+                                    role="button"
+                                    tabIndex={0}
+                                    onClick={() => {
+                                      setNewPrompt({ ...newPrompt, category: cat.name });
+                                      setIsCategoryOpen(false);
+                                      setCategoryQuery('');
+                                    }}
+                                    onKeyDown={(e) => {
+                                      if (e.key === 'Enter' || e.key === ' ') {
+                                        e.preventDefault();
+                                        setNewPrompt({ ...newPrompt, category: cat.name });
+                                        setIsCategoryOpen(false);
+                                        setCategoryQuery('');
+                                      }
+                                    }}
+                                    className={`w-full text-left py-2.5 text-sm transition-all duration-200 flex items-center group relative cursor-pointer ${
+                                      newPrompt.category === cat.name
+                                        ? 'bg-accent text-foreground shadow-sm'
+                                        : 'text-foreground hover:bg-accent hover:shadow-sm'
+                                    }`}
+                                    style={{ paddingLeft: `${16 + indent}px`, paddingRight: '8px' }}
+                                  >
+                                    <div className={`absolute left-0 top-0 bottom-0 w-1 create-accent-bar transition-all duration-200 ${
+                                      newPrompt.category === cat.name 
+                                        ? 'opacity-100' 
+                                        : 'opacity-0 group-hover:opacity-100'
+                                    }`} />
+                                    
+                                    <div className="flex items-center gap-2 flex-1 min-w-0">
+                                      {cat.level > 0 && (
+                                        <span className="text-muted-foreground text-xs font-mono leading-none group-hover:text-foreground transition-colors">
+                                          {prefix}
+                                        </span>
+                                      )}
+                                      <div className="flex items-center gap-2.5 flex-1 min-w-0">
+                                        {cat.hasChildren ? (
+                                          <FolderOpen
+                                            size={16}
+                                            className={`${
+                                              newPrompt.category === cat.name
+                                                ? 'notion-sidebar-folder active'
+                                                : 'notion-sidebar-folder'
+                                            } flex-shrink-0`}
+                                          />
+                                        ) : (
+                                          <Folder
+                                            size={16}
+                                            className={`${
+                                              newPrompt.category === cat.name
+                                                ? 'notion-sidebar-folder active'
+                                                : 'notion-sidebar-folder'
+                                            } flex-shrink-0`}
+                                          />
+                                        )}
+                                        <span className="truncate font-medium group-hover:font-semibold transition-all">{cat.name}</span>
                                       </div>
-                                      <span className="truncate font-medium group-hover:font-semibold transition-all">{cat.name}</span>
                                     </div>
+
+                                    <Button
+                                      onClick={(e) => {
+                                        e.preventDefault();
+                                        e.stopPropagation();
+                                        handleStartCreateSubCategoryFromDropdown(cat.path);
+                                      }}
+                                      variant="ghost"
+                                      size="icon"
+                                      className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-foreground hover:bg-accent"
+                                      title="在此分类下新建"
+                                      aria-label="在此分类下新建"
+                                    >
+                                      <Plus size={14} />
+                                    </Button>
                                   </div>
-                                  
-                                  {/* 选中状态指示器 */}
-                                  {newPrompt.category === cat.name && (
-                                    <div className="w-2 h-2 bg-primary rounded-full flex-shrink-0 ml-2 animate-pulse" />
-                                  )}
-                                  
-                                  {/* 悬停时的选择提示 */}
-                                  {newPrompt.category !== cat.name && (
-                                    <div className="opacity-0 group-hover:opacity-100 transition-opacity duration-200 flex-shrink-0 ml-2">
-                                      <div className="w-1.5 h-1.5 bg-primary/60 rounded-full" />
+
+                                  {dropdownCreatingParentPath === cat.path && (
+                                    <div
+                                      className="mx-4 my-1 px-3 py-2 rounded-lg bg-accent border border-border animate-fade-in"
+                                      style={{ marginLeft: `${16 + indent + 16}px` }}
+                                    >
+                                      <input
+                                        ref={dropdownNewCategoryInputRef}
+                                        type="text"
+                                        value={dropdownNewCategoryName}
+                                        onChange={(e) => setDropdownNewCategoryName(e.target.value)}
+                                        onKeyDown={handleDropdownNewCategoryKeyDown}
+                                        onBlur={handleSubmitCreateSubCategoryFromDropdown}
+                                        placeholder="输入子分类名称..."
+                                        className="w-full bg-transparent text-foreground placeholder:text-muted-foreground outline-none text-sm"
+                                      />
                                     </div>
                                   )}
-                                </button>
+                                </div>
                               );
                             })
                           )}
@@ -916,23 +1180,25 @@ export function PromptList() {
                 </div>
                 
                 <div className="flex items-center gap-3">
-                  <button 
-                    onClick={() => dispatch({ type: 'CLOSE_NEW_PROMPT_MODAL' })}
-                    className="px-4 py-2 text-sm text-muted-foreground hover:bg-accent rounded-lg transition-colors"
+                  <Button
+                    onClick={requestCloseNewPrompt}
+                    variant="ghost"
+                    className="text-muted-foreground hover:bg-accent"
                   >
                     取消
-                  </button>
-                  <button 
+                  </Button>
+                  <Button
                     onClick={handleAddPrompt}
-                    className="theme-button-primary px-6 py-2 text-sm rounded-lg shadow-sm transition-colors font-medium"
+                    className="px-6 py-2 font-medium"
+                    disabled={!newPrompt.title.trim()}
                   >
                     创建
-                  </button>
+                  </Button>
                 </div>
               </div>
             </div>
           </div>
-        </div>
+        </NewPromptOverlay>
       )}
     </div>
   );

@@ -87,7 +87,7 @@ router.get('/:id', async (req, res, next) => {
     const { id } = req.params;
 
     const categories = await scanDirectory(VAULT_ROOT, VAULT_ROOT);
-    const promptPath = findPromptPathById(categories, id);
+    const promptPath = await findPromptPathById(categories, id, VAULT_ROOT);
 
     if (!promptPath) {
       return res.status(404).json({
@@ -169,7 +169,7 @@ router.put('/:id', async (req, res, next) => {
 
     // 查找提示词路径
     const categories = await scanDirectory(VAULT_ROOT, VAULT_ROOT);
-    const promptPath = findPromptPathById(categories, id);
+    const promptPath = await findPromptPathById(categories, id, VAULT_ROOT);
 
     if (!promptPath) {
       return res.status(404).json({
@@ -219,7 +219,7 @@ router.delete('/:id', async (req, res, next) => {
 
     // 查找提示词路径
     const categories = await scanDirectory(VAULT_ROOT, VAULT_ROOT);
-    const promptPath = findPromptPathById(categories, id);
+    const promptPath = await findPromptPathById(categories, id, VAULT_ROOT);
 
     if (!promptPath) {
       return res.status(404).json({
@@ -258,7 +258,7 @@ router.post('/:id/restore', async (req, res, next) => {
 
     // 查找提示词路径
     const categories = await scanDirectory(VAULT_ROOT, VAULT_ROOT);
-    const promptPath = findPromptPathById(categories, id);
+    const promptPath = await findPromptPathById(categories, id, VAULT_ROOT);
 
     if (!promptPath) {
       return res.status(404).json({
@@ -304,7 +304,7 @@ router.post('/:id/images', upload.single('image'), async (req, res, next) => {
 
     // 查找提示词路径
     const categories = await scanDirectory(VAULT_ROOT, VAULT_ROOT);
-    const promptPath = findPromptPathById(categories, id);
+    const promptPath = await findPromptPathById(categories, id, VAULT_ROOT);
 
     if (!promptPath) {
       return res.status(404).json({

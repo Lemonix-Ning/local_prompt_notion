@@ -14,7 +14,8 @@ import {
 } from 'lucide-react';
 import { useApp } from '../AppContext';
 import { PromptData } from '../types';
-import { getSmartGradient, getSmartIcon } from '../utils/smartIcon';
+import { getSmartIcon } from '../utils/smartIcon';
+import { getIconGradientConfig } from '../utils/tagColors';
 import { useToast } from '../contexts/ToastContext';
 import { useConfirm } from '../contexts/ConfirmContext';
 import { useTheme } from '../contexts/ThemeContext';
@@ -284,10 +285,17 @@ export function EditorPage({ promptId, onClose }: EditorPageProps) {
           <div className="flex items-start gap-6">
             {(() => {
               const Icon = getSmartIcon(formData.meta.title, formData.meta.tags);
-              const [from, to] = getSmartGradient(formData.meta.title, formData.meta.tags);
+              const gradient = getIconGradientConfig(formData.meta.tags);
               return (
-                <div className={`w-14 h-14 rounded-2xl bg-gradient-to-br ${from} ${to} flex items-center justify-center shadow-lg ${theme === 'dark' ? 'shadow-white/5 border border-white/10' : 'shadow-gray-200 border border-gray-200'} flex-shrink-0`}>
-                  <Icon size={26} className="text-black/90" />
+                <div
+                  className="w-14 h-14 rounded-2xl flex items-center justify-center flex-shrink-0"
+                  style={{
+                    backgroundImage: gradient.backgroundImage,
+                    border: gradient.border,
+                    boxShadow: gradient.boxShadow,
+                  }}
+                >
+                  <Icon size={26} style={{ color: gradient.iconColor }} />
                 </div>
               );
             })()}

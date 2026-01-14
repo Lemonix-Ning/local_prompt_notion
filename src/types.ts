@@ -148,6 +148,7 @@ export interface IFileSystemAdapter {
   createPrompt(categoryPath: string, title: string): Promise<PromptData>;
   createCategory(parentPath: string, name: string): Promise<void>;
   renameCategory(categoryPath: string, newName: string): Promise<void>;
+  moveCategory(categoryPath: string, targetParentPath: string): Promise<{ name: string; path: string; usedFallback?: boolean }>;
   deleteCategory(categoryPath: string): Promise<void>;
   searchPrompts(query: string, prompts: PromptData[]): PromptData[];
   getAllTags(prompts: PromptData[]): string[];

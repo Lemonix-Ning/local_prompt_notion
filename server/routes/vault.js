@@ -9,6 +9,7 @@ const {
   scanDirectory,
   collectAllPrompts,
   normalizePromptsCategoryPath,
+  loadPromptsInDirectory,
 } = require('../utils/fileSystem');
 
 // 获取 VAULT_ROOT
@@ -21,7 +22,13 @@ const VAULT_ROOT = process.env.VAULT_PATH || path.join(__dirname, '../../sample-
 router.get('/scan', async (req, res, next) => {
   try {
     const categories = await scanDirectory(VAULT_ROOT, VAULT_ROOT);
+    
+    // 收集所有分类中的提示词
     const allPrompts = collectAllPrompts(categories);
+    
+    // 同时收集根目录中的提示词（没有分类的提示词）
+    const rootPrompts = await loadPromptsInDirectory(VAULT_ROOT);
+    allPrompts.push(...rootPrompts);
 
     // 转换为 Map 格式
     const promptsMap = {};
