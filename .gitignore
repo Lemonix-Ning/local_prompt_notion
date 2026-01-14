@@ -57,6 +57,10 @@ sample-vault/.config/
 vault/
 test-vault/
 
+# Accidentally restored folders (should be deleted manually)
+sample-vault_restored_*/
+*_restored_*/
+
 # Duplicated sample data under build folders (keep only repo root sample-vault/)
 src-tauri/sample-vault/
 server/sample-vault/
@@ -65,7 +69,22 @@ server/sample-vault/
 sample-vault/123/
 sample-vault/1234/
 sample-vault/dasRenamed/
+sample-vault/dasdas_moved/
+sample-vault/Coding_restored_*/
+sample-vault/*_restored*/
+sample-vault/test_prompt/
+sample-vault/sql_optimizer/
+sample-vault/项目/
 
 # Temporary files
 PROJECT_COMPLETION_SUMMARY.md
 qs.md
+
+# Development logs and notes
+DEVLOG.md
+
+# Kiro AI assistant files (keep local, not for version control)
+.kiro/
+
+# Documentation drafts (optional working documents)
+docs/tst.md

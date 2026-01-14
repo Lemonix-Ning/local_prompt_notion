@@ -5,9 +5,9 @@
   "identifier": "com.promptmanager.desktop",
   "build": {
     "frontendDist": "../dist",
-    "devUrl": "http://localhost:3002",
+    "devUrl": "http://localhost:3000",
     "beforeDevCommand": "npm run dev:client",
-    "beforeBuildCommand": "copy .env.tauri .env && npm run build"
+    "beforeBuildCommand": "if exist .env.tauri (copy /Y .env.tauri .env) else (echo VITE_USE_MOCK=false> .env & echo VITE_API_BASE=http://localhost:3002/api>> .env) && npm run build"
   },
   "app": {
     "windows": [
@@ -21,7 +21,8 @@
         "transparent": false,
         "center": true,
         "minWidth": 800,
-        "minHeight": 600
+        "minHeight": 600,
+        "dragDropEnabled": false
       }
     ],
     "security": {

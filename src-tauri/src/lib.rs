@@ -78,21 +78,46 @@ pub fn run() {
       }
 
       // Start bundled sidecar backend (does not require system Node.js).
+      println!("========================================");
       println!("Starting backend sidecar...");
-      let backend = app
-        .shell()
-        .sidecar("server")?
-        .env("PORT", "3001")
-        .env("VAULT_PATH", &vault_root)
-        .spawn();
+      println!("========================================");
+      println!("Vault root: {:?}", vault_root);
+      println!("Expected sidecar name: server");
+      println!("Expected sidecar path: binaries/server-x86_64-pc-windows-msvc.exe");
+      
+      let sidecar_result = app.shell().sidecar("server");
+      
+      match sidecar_result {
+        Ok(command) => {
+          println!("✓ Sidecar command created successfully");
+          
+          let spawn_result = command
+            .env("PORT", "3002")
+            .env("VAULT_PATH", vault_root.to_string_lossy().to_string())
+            .spawn();
 
-      match backend {
-        Ok((_rx, child)) => {
-          app.manage(BackendProcess(Mutex::new(Some(child))));
-          println!("Backend server started successfully on port 3001");
+          match spawn_result {
+            Ok((_rx, child)) => {
+              app.manage(BackendProcess(Mutex::new(Some(child))));
+              println!("✓ Backend server started successfully");
+              println!("  - Port: 3002");
+              println!("  - Vault: {:?}", vault_root);
+              println!("========================================");
+            }
+            Err(err) => {
+              eprintln!("✗ Failed to spawn backend server");
+              eprintln!("  Error: {}", err);
+              eprintln!("  Debug: {:?}", err);
+              eprintln!("========================================");
+            }
+          }
         }
         Err(err) => {
-          eprintln!("Failed to start backend server: {}", err);
+          eprintln!("✗ Failed to create sidecar command");
+          eprintln!("  Error: {}", err);
+          eprintln!("  Debug: {:?}", err);
+          eprintln!("  Hint: Check if binaries/server-x86_64-pc-windows-msvc.exe exists");
+          eprintln!("========================================");
         }
       }
 

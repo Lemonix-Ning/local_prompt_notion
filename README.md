@@ -97,10 +97,12 @@ local_prompt_notion/
 │   ├── components/               # React 组件
 │   │   ├── Sidebar.tsx           # 左侧导航(分类树、主题切换)
 │   │   ├── PromptList.tsx        # 提示词列表卡片(新建页面)
-│   │   ├── EditorPage.tsx        # 全屏编辑器
-│   │   └── Editor.tsx            # 编辑组件(已弃用)
+│   │   ├── EditorOverlay.tsx     # Mac 风格编辑器覆盖层
+│   │   └── NewPromptOverlay.tsx  # 新建提示词覆盖层
 │   ├── contexts/                 # React 上下文
-│   │   └── ThemeContext.tsx      # 主题管理上下文
+│   │   ├── ThemeContext.tsx      # 主题管理上下文
+│   │   ├── ToastContext.tsx      # 消息提示上下文
+│   │   └── ConfirmContext.tsx    # 确认对话框上下文
 │   ├── adapters/
 │   │   └── ApiFileSystemAdapter.ts   # API 适配器
 │   ├── api/
@@ -110,31 +112,46 @@ local_prompt_notion/
 │   │   └── tagColors.ts          # 确定性标签颜色系统
 │   ├── App.tsx                   # 主应用组件
 │   ├── AppContext.tsx            # 全局状态管理
-│   ├── fileSystemAdapter.ts      # 文件系统适配器(Node环境/本地)
 │   ├── mockFileSystemAdapter.ts  # Mock 适配器(浏览器/前端安全)
 │   ├── types.ts                  # TypeScript 类型定义
 │   ├── index.css                 # 全局样式(主题系统)
-│   └── index.tsx                 # 入口文件
+│   └── main.tsx                  # 入口文件
 ├── server/                       # 后端源代码
 │   ├── index.js                  # 服务器入口
 │   ├── routes/                   # Express 路由
 │   │   ├── vault.js              # Vault 扫描路由
 │   │   ├── prompts.js            # 提示词 CRUD 路由
 │   │   ├── categories.js         # 分类管理路由
+│   │   ├── trash.js              # 回收站路由
 │   │   └── search.js             # 搜索路由
 │   └── utils/
 │       └── fileSystem.js         # 文件系统工具函数
-├── sample-vault/                 # 示例数据目录
+├── src-tauri/                    # Tauri 桌面应用
+│   ├── src/
+│   │   └── lib.rs                # Rust 主程序
+│   ├── tauri.conf.json           # Tauri 配置
+│   └── Cargo.toml                # Rust 依赖
+├── scripts/                      # 工具脚本
+│   ├── cleanup-temp-folders.js   # 清理临时文件夹
+│   └── cleanup-temp-folders.bat  # Windows 清理脚本
+├── sample-vault/                 # 示例数据目录（提交到 Git）
 │   ├── Business/                 # 业务分类
 │   ├── Coding/                   # 编程分类
 │   ├── Creative Writing/         # 创意写作分类
 │   └── trash/                    # 回收站
+├── vault/                        # 本地数据目录（不提交，.gitignore）
+├── test-vault/                   # 测试数据目录（不提交，.gitignore）
 ├── package.json                  # 前端依赖配置
-├── server/package.json           # 后端依赖配置
 ├── vite.config.ts                # Vite 配置
 ├── tsconfig.json                 # TypeScript 配置
 └── README.md                     # 本文档
 ```
+
+**目录说明**:
+- `sample-vault/` - 示例数据，包含在 Git 仓库中，供新用户参考
+- `vault/` - 本地实际使用的数据目录，不提交到 Git
+- `test-vault/` - 测试用数据目录，不提交到 Git
+- 所有 `*_restored_*` 文件夹都是临时文件，应该删除
 
 ### 数据模型
 
@@ -240,19 +257,48 @@ npm run build
 ```
 
 #### 桌面应用版本 (Windows exe)
+
+**完整构建流程：**
+
 ```bash
+# 一键构建（推荐）
 npm run desktop:build
-# 生成以下文件:
-# - src-tauri/target/release/promptmanager.exe
-# - src-tauri/target/release/bundle/msi/PromptManager_1.0.0_x64_en-US.msi
-# - src-tauri/target/release/bundle/nsis/PromptManager_1.0.0_x64-setup.exe
+
+# 这个命令会自动：
+# 1. 构建后端 sidecar
+# 2. 构建前端
+# 3. 打包桌面应用
+```
+
+**手动构建（如果需要）：**
+
+```bash
+# 1. 先构建后端 sidecar
+npm run build:sidecar
+
+# 2. 再构建桌面应用
+npm run tauri build
+```
+
+**生成文件位置：**
+```
+src-tauri/target/release/
+├── promptmanager.exe                                    # 绿色版（免安装）
+└── bundle/
+    ├── msi/
+    │   └── PromptManager_1.0.0_x64_en-US.msi           # MSI 安装包
+    └── nsis/
+        └── PromptManager_1.0.0_x64-setup.exe           # NSIS 安装包
 ```
 
 **桌面应用特性**:
 - 原生Windows应用体验
-- 内置后端服务器，无需单独启动
+- 内置后端服务器（端口 3002），无需单独启动
 - 完整功能，包含所有主题和交互特性
 - 支持绿色版(免安装)和安装包两种分发方式
+- 数据存储在可执行文件旁边的 `vault/` 目录
+
+**详细说明**：参见 [桌面应用构建指南](./docs/desktop-build-guide.md)
 
 ## Usage
 

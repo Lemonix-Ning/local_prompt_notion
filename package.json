@@ -12,10 +12,12 @@
     "build": "tsc && vite build",
     "preview": "vite preview",
     "lint": "eslint src --ext ts,tsx",
+    "cleanup": "node scripts/cleanup-temp-folders.cjs",
+    "check:desktop": "node scripts/check-desktop-build.cjs",
     "tauri": "tauri",
     "build:sidecar": "node scripts/build-sidecar.mjs",
     "desktop:dev": "npm run tauri dev",
-    "desktop:build": "npm run tauri build"
+    "desktop:build": "npm run build:sidecar && npm run tauri build"
   },
   "keywords": [
     "prompt",

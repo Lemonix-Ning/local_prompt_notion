@@ -49,7 +49,7 @@ function AppContent({ initialRoot }: AppContentProps) {
   }
 
   return (
-    <div className="relative flex h-screen w-full bg-background text-foreground font-sans overflow-hidden selection:bg-primary/30">
+    <div className="relative flex h-screen w-full bg-transparent text-foreground font-sans overflow-hidden selection:bg-primary/30">
       <div className="absolute inset-0 bg-grid pointer-events-none z-0" />
       <div className="absolute inset-0 aurora-bg pointer-events-none z-0" />
       <div className="relative z-10 flex h-screen w-full overflow-hidden">
