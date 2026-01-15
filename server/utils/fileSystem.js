@@ -173,12 +173,15 @@ async function readPrompt(promptPath) {
 /**
  * 写入提示词
  */
-async function writePrompt(promptPath, data) {
+async function writePrompt(promptPath, data, options = {}) {
   // 确保目录存在
   await fs.mkdir(promptPath, { recursive: true });
 
   // 更新时间戳
-  data.meta.updated_at = new Date().toISOString();
+  const touchUpdatedAt = options.touchUpdatedAt !== false;
+  if (touchUpdatedAt) {
+    data.meta.updated_at = new Date().toISOString();
+  }
 
   // 写入元数据
   const metaPath = path.join(promptPath, 'meta.json');
@@ -248,6 +251,10 @@ async function updatePrompt(promptPath, updates) {
   // 读取现有数据
   const existing = await readPrompt(promptPath);
 
+  // 重要：必须做快照，否则 beforeMeta 与 existing.meta 指向同一对象，比较会失效
+  const beforeMeta = JSON.parse(JSON.stringify(existing.meta || {}));
+  const beforeContent = existing.content;
+
   // 更新元数据
   if (updates.title !== undefined) existing.meta.title = updates.title;
   if (updates.tags !== undefined) existing.meta.tags = updates.tags;
@@ -259,7 +266,15 @@ async function updatePrompt(promptPath, updates) {
   if (updates.content !== undefined) existing.content = updates.content;
 
   // 写入
-  await writePrompt(promptPath, existing);
+  const changedFavorite = beforeMeta.is_favorite !== existing.meta.is_favorite;
+  const changedTitle = beforeMeta.title !== existing.meta.title;
+  const changedAuthor = (beforeMeta.author || '') !== (existing.meta.author || '');
+  const changedTags = JSON.stringify(beforeMeta.tags || []) !== JSON.stringify(existing.meta.tags || []);
+  const changedModel = JSON.stringify(beforeMeta.model_config || {}) !== JSON.stringify(existing.meta.model_config || {});
+  const changedContent = (beforeContent || '') !== (existing.content || '');
+
+  const onlyFavoriteChanged = changedFavorite && !changedTitle && !changedAuthor && !changedTags && !changedModel && !changedContent;
+  await writePrompt(promptPath, existing, { touchUpdatedAt: !onlyFavoriteChanged });
 
   return existing;
 }

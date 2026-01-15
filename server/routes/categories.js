@@ -14,7 +14,8 @@ const {
   isPathSafe,
 } = require('../utils/fileSystem');
 
-const VAULT_ROOT = process.env.VAULT_PATH || path.join(__dirname, '../../sample-vault');
+const rawVaultPath = process.env.VAULT_PATH && process.env.VAULT_PATH.trim();
+const VAULT_ROOT = rawVaultPath || path.join(__dirname, '../../vault');
 
 /**
  * GET /api/categories

@@ -3,7 +3,8 @@ const router = express.Router();
 const path = require('path');
 const fs = require('fs').promises;
 
-const VAULT_ROOT = process.env.VAULT_PATH || path.join(__dirname, '../../sample-vault');
+const rawVaultPath = process.env.VAULT_PATH && process.env.VAULT_PATH.trim();
+const VAULT_ROOT = rawVaultPath || path.join(__dirname, '../../vault');
 const TRASH_DIR = path.join(VAULT_ROOT, 'trash');
 const VISITS_FILE = path.join(TRASH_DIR, '.trash-visits.json');
 const DEFAULT_THRESHOLD = 10;

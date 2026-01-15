@@ -22,7 +22,8 @@ const {
   searchPrompts,
 } = require('../utils/fileSystem');
 
-const VAULT_ROOT = process.env.VAULT_PATH || path.join(__dirname, '../../sample-vault');
+const rawVaultPath = process.env.VAULT_PATH && process.env.VAULT_PATH.trim();
+const VAULT_ROOT = rawVaultPath || path.join(__dirname, '../../vault');
 
 // 配置 multer 用于图片上传
 const storage = multer.memoryStorage();

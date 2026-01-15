@@ -12,7 +12,8 @@ const {
   getAllTags,
 } = require('../utils/fileSystem');
 
-const VAULT_ROOT = process.env.VAULT_PATH || path.join(__dirname, '../../sample-vault');
+const rawVaultPath = process.env.VAULT_PATH && process.env.VAULT_PATH.trim();
+const VAULT_ROOT = rawVaultPath || path.join(__dirname, '../../vault');
 
 /**
  * GET /api/search
@@ -21,7 +22,8 @@ const VAULT_ROOT = process.env.VAULT_PATH || path.join(__dirname, '../../sample-
  */
 router.get('/', async (req, res, next) => {
   try {
-    const { q, tags, category } = req.query;
+    const query = req.query.q || '';
+    const { tags, category } = req.query;
 
     const categories = await scanDirectory(VAULT_ROOT, VAULT_ROOT);
     let prompts = collectAllPrompts(categories);

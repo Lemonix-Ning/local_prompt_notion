@@ -7,8 +7,9 @@
   "scripts": {
     "dev": "vite",
     "dev:client": "vite --port 3000 --strictPort",
-    "dev:server": "set PORT=3001 && npm --prefix server start",
+    "dev:server": "set PORT=3001 && set VAULT_PATH=%cd%\\vault && npm --prefix server start",
     "dev:api": "concurrently -k -n server,client -c blue,green \"npm run dev:server\" \"npm run dev:client\"",
+    "seed:vault": "node scripts/seed-vault.cjs",
     "build": "tsc && vite build",
     "preview": "vite preview",
     "lint": "eslint src --ext ts,tsx",
@@ -17,7 +18,7 @@
     "tauri": "tauri",
     "build:sidecar": "node scripts/build-sidecar.mjs",
     "desktop:dev": "npm run tauri dev",
-    "desktop:build": "npm run build:sidecar && npm run tauri build"
+    "desktop:build": "npm run tauri build"
   },
   "keywords": [
     "prompt",

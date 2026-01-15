@@ -7,7 +7,7 @@
     "frontendDist": "../dist",
     "devUrl": "http://localhost:3000",
     "beforeDevCommand": "npm run dev:client",
-    "beforeBuildCommand": "if exist .env.tauri (copy /Y .env.tauri .env) else (echo VITE_USE_MOCK=false> .env & echo VITE_API_BASE=http://localhost:3002/api>> .env) && npm run build"
+    "beforeBuildCommand": "npm run build:sidecar && if exist .env.tauri (copy /Y .env.tauri .env) else (echo VITE_USE_MOCK=false> .env & echo VITE_API_BASE=http://localhost:3002/api>> .env) && npm run build"
   },
   "app": {
     "windows": [
@@ -38,9 +38,7 @@
     "externalBin": [
       "binaries/server"
     ],
-    "resources": [
-      "sample-vault"
-    ],
+    "resources": [],
     "icon": [
       "icons/icon.ico"
     ]

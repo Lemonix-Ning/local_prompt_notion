@@ -3,7 +3,27 @@
  * 与后端服务通信
  */
 
-const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:3001/api';
+const DEFAULT_API_BASE = 'http://localhost:3001/api';
+const DESKTOP_API_BASE = 'http://localhost:3002/api';
+const ENV_API_BASE = import.meta.env.VITE_API_BASE as string | undefined;
+
+// 🔥 检测是否在 Tauri 桌面环境中
+const isTauri =
+  typeof window !== 'undefined' &&
+  typeof (window as any).__TAURI__ !== 'undefined' &&
+  (window as any).__TAURI__;
+
+// 🔥 桌面端始终使用 3002 端口，网页端使用环境变量或默认 3001 端口
+let runtimeApiBase: string;
+if (isTauri) {
+  // 桌面端：强制使用 3002 端口，不进行任何回退
+  runtimeApiBase = DESKTOP_API_BASE;
+  console.log('[API Client] Running in Tauri desktop mode, using port 3002');
+} else {
+  // 网页端：使用环境变量或默认值
+  runtimeApiBase = ENV_API_BASE || DEFAULT_API_BASE;
+  console.log('[API Client] Running in web mode, using:', runtimeApiBase);
+}
 
 interface ApiResponse<T = any> {
   success: boolean;
@@ -19,8 +39,8 @@ async function request<T = any>(
   endpoint: string,
   options?: RequestInit
 ): Promise<ApiResponse<T>> {
-  try {
-    const response = await fetch(`${API_BASE}${endpoint}`, {
+  const fetchOnce = async (base: string): Promise<ApiResponse<T>> => {
+    const response = await fetch(`${base}${endpoint}`, {
       headers: {
         'Content-Type': 'application/json',
         ...options?.headers,
@@ -35,8 +55,28 @@ async function request<T = any>(
     }
 
     return data;
+  };
+
+  try {
+    return await fetchOnce(runtimeApiBase);
   } catch (error) {
-    console.error('API request error:', error);
+    // 🔥 只有在网页端才进行端口回退，桌面端不回退
+    if (!isTauri && runtimeApiBase !== DEFAULT_API_BASE) {
+      try {
+        console.warn(`[API Client] Request failed for ${runtimeApiBase}, retrying with ${DEFAULT_API_BASE}`, error);
+        const out = await fetchOnce(DEFAULT_API_BASE);
+        runtimeApiBase = DEFAULT_API_BASE;
+        return out;
+      } catch (retryError) {
+        console.error('[API Client] Retry also failed:', retryError);
+        return {
+          success: false,
+          error: retryError instanceof Error ? retryError.message : 'Unknown error',
+        };
+      }
+    }
+
+    console.error('[API Client] Request error:', error);
     return {
       success: false,
       error: error instanceof Error ? error.message : 'Unknown error',
@@ -140,7 +180,7 @@ export const api = {
       formData.append('image', file);
 
       try {
-        const response = await fetch(`${API_BASE}/prompts/${promptId}/images`, {
+        const response = await fetch(`${runtimeApiBase}/prompts/${promptId}/images`, {
           method: 'POST',
           body: formData,
         });

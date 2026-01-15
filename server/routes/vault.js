@@ -12,8 +12,8 @@ const {
   loadPromptsInDirectory,
 } = require('../utils/fileSystem');
 
-// 获取 VAULT_ROOT
-const VAULT_ROOT = process.env.VAULT_PATH || path.join(__dirname, '../../sample-vault');
+const rawVaultPath = process.env.VAULT_PATH && process.env.VAULT_PATH.trim();
+const VAULT_ROOT = rawVaultPath || path.join(__dirname, '../../vault');
 
 /**
  * GET /api/vault/scan
