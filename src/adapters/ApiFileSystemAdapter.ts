@@ -3,7 +3,6 @@ import {
   IFileSystemAdapter,
   FileSystemState,
   PromptData,
-  CategoryNode,
 } from '../types';
 
 /**
@@ -13,21 +12,11 @@ import {
 export class ApiFileSystemAdapter implements IFileSystemAdapter {
   private pathToId = new Map<string, string>();
 
-  private rebuildPathIndex(categories: CategoryNode[]) {
+  private rebuildPathIndex(allPrompts: Map<string, PromptData>) {
     this.pathToId.clear();
-
-    const walk = (nodes: CategoryNode[]) => {
-      nodes.forEach(node => {
-        node.prompts.forEach(prompt => {
-          this.pathToId.set(prompt.path, prompt.meta.id);
-        });
-        if (node.children?.length) {
-          walk(node.children);
-        }
-      });
-    };
-
-    walk(categories);
+    allPrompts.forEach(prompt => {
+      this.pathToId.set(prompt.path, prompt.meta.id);
+    });
   }
 
   private getPromptIdByPath(promptPath: string): string {
@@ -52,7 +41,7 @@ export class ApiFileSystemAdapter implements IFileSystemAdapter {
       allPrompts.set(promptData.meta.id, promptData);
     });
 
-    this.rebuildPathIndex(response.data.categories || []);
+    this.rebuildPathIndex(allPrompts);
 
     return {
       root: response.data.root,

@@ -3,7 +3,8 @@
  * 实现 Mac 风格共享元素过渡动画 + 沉浸式编辑器UI
  */
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import { useTheme } from '../contexts/ThemeContext';
 import { useApp } from '../AppContext';
 import { 
@@ -15,8 +16,11 @@ import {
   Trash2,
   ChevronDown,
   Folder,
-  FolderOpen
+  FolderOpen,
+  Maximize2,
+  Minimize2
 } from 'lucide-react';
+
 import { getSmartIcon } from '../utils/smartIcon';
 import { getIconGradientConfig, getTagStyle } from '../utils/tagColors';
 import { useToast } from '../contexts/ToastContext';
@@ -53,11 +57,50 @@ function CategorySelector({ currentCategory, onCategoryChange, theme, vaultRoot 
   const [isOpen, setIsOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const selectorRef = useRef<HTMLDivElement>(null);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const [menuPos, setMenuPos] = useState<{ top: number; left: number; width: number }>({
+    top: 0,
+    left: 0,
+    width: 0,
+  });
+
+  const updateMenuPos = () => {
+    const el = buttonRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    const minWidth = 240;
+    const width = Math.max(rect.width, minWidth);
+    const nextLeft = (() => {
+      if (typeof window === 'undefined') return rect.left;
+      const maxLeft = Math.max(8, window.innerWidth - width - 8);
+      return Math.max(8, Math.min(rect.left, maxLeft));
+    })();
+    const nextTop = (() => {
+      if (typeof window === 'undefined') return rect.bottom + 4;
+      const gap = 4;
+      const menuMaxHeight = 300;
+      const preferDown = rect.bottom + gap;
+      const preferUp = rect.top - gap - menuMaxHeight;
+      const fitsDown = preferDown + menuMaxHeight <= window.innerHeight - 8;
+      const t = fitsDown ? preferDown : preferUp;
+      return Math.max(8, Math.min(t, window.innerHeight - 8 - menuMaxHeight));
+    })();
+
+    setMenuPos({
+      top: nextTop,
+      left: nextLeft,
+      width,
+    });
+  };
 
   // 点击外部关闭
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
-      if (selectorRef.current && !selectorRef.current.contains(event.target as Node)) {
+      const target = event.target as Node;
+      const insideTrigger = !!(selectorRef.current && selectorRef.current.contains(target));
+      const insideMenu = !!(menuRef.current && menuRef.current.contains(target));
+      if (!insideTrigger && !insideMenu) {
         setIsOpen(false);
         setSearchQuery('');
       }
@@ -69,6 +112,22 @@ function CategorySelector({ currentCategory, onCategoryChange, theme, vaultRoot 
 
     return () => {
       document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [isOpen]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    // 首帧 rect 可能不稳定，延迟到下一帧计算位置，避免 width=0/坐标错误
+    const raf = requestAnimationFrame(() => updateMenuPos());
+
+    const handle = () => updateMenuPos();
+    window.addEventListener('resize', handle);
+    window.addEventListener('scroll', handle, true);
+
+    return () => {
+      cancelAnimationFrame(raf);
+      window.removeEventListener('resize', handle);
+      window.removeEventListener('scroll', handle, true);
     };
   }, [isOpen]);
 
@@ -125,7 +184,12 @@ function CategorySelector({ currentCategory, onCategoryChange, theme, vaultRoot 
   return (
     <div ref={selectorRef} style={{ position: 'relative' }}>
       <button
-        onClick={() => setIsOpen(!isOpen)}
+        ref={buttonRef}
+        onClick={() => {
+          const next = !isOpen;
+          setIsOpen(next);
+          if (next) updateMenuPos();
+        }}
         style={{
           display: 'flex',
           alignItems: 'center',
@@ -169,22 +233,24 @@ function CategorySelector({ currentCategory, onCategoryChange, theme, vaultRoot 
         />
       </button>
 
-      {isOpen && (
+      {isOpen && typeof document !== 'undefined' && createPortal(
         <div style={{
-          position: 'absolute',
-          top: '100%',
-          left: 0,
-          right: 0,
-          marginTop: '4px',
-          backgroundColor: theme === 'dark' ? '#000000' : '#ffffff',
-          border: `1px solid ${theme === 'dark' ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)'}`,
-          borderRadius: '8px',
-          boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.25)',
-          zIndex: 1000,
-          maxHeight: '300px',
-          overflow: 'hidden',
-          animation: 'fadeIn 0.2s ease-out'
+          position: 'fixed',
+          top: `${menuPos.top || 8}px`,
+          left: `${menuPos.left || 8}px`,
+          width: `${menuPos.width || 240}px`,
+          zIndex: 1000001,
+          pointerEvents: 'auto',
         }}>
+          <div ref={menuRef} style={{
+            backgroundColor: theme === 'dark' ? '#000000' : '#ffffff',
+            border: `1px solid ${theme === 'dark' ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)'}`,
+            borderRadius: '8px',
+            boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.25)',
+            maxHeight: '300px',
+            overflow: 'hidden',
+            animation: 'fadeIn 0.2s ease-out'
+          }}>
           {/* 搜索框 */}
           <div style={{ padding: '12px', borderBottom: `1px solid ${theme === 'dark' ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)'}` }}>
             <input
@@ -350,8 +416,10 @@ function CategorySelector({ currentCategory, onCategoryChange, theme, vaultRoot 
             )}
           </div>
         </div>
-      )}
-    </div>
+      </div>,
+      document.body
+    )}
+  </div>
   );
 }
 
@@ -359,11 +427,33 @@ export function EditorOverlay({ promptId, originCardId, onClose }: EditorOverlay
   const { theme } = useTheme();
   const { state, savePrompt, deletePrompt } = useApp();
   const { showToast } = useToast();
-  const { confirm } = useConfirm();
+  useConfirm(); // 保留 hook 调用以维持 Context 订阅
   const [animationState, setAnimationState] = useState<AnimationState | null>(null);
+  const [isExpanded, setIsExpanded] = useState(false);
+  const [isFocusMode, setIsFocusMode] = useState(false);
   const [isClosing, setIsClosing] = useState(false);
+
   const scrollableRef = useRef<HTMLDivElement>(null);
   const scrollTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  
+  // 🔥 添加 firework 效果状态
+  const [isBursting, setIsBursting] = useState(false);
+  const [burstAnchor, setBurstAnchor] = useState<{ x: number; y: number } | null>(null);
+  const burstTimerRef = useRef<number | null>(null);
+
+  const fireworkParticles = useMemo(() => {
+    return Array.from({ length: 8 }).map((_, i) => {
+      const angle = (i * 45) * (Math.PI / 180);
+      const distance = 24;
+      const tx = Math.cos(angle) * distance;
+      const ty = Math.sin(angle) * distance;
+      return {
+        tx: `${tx}px`,
+        ty: `${ty}px`,
+        color: i % 2 === 0 ? '#facc15' : '#fb923c',
+      };
+    });
+  }, []);
   
   // 获取提示词数据
   const prompt = state.fileSystem?.allPrompts.get(promptId);
@@ -672,6 +762,7 @@ export function EditorOverlay({ promptId, originCardId, onClose }: EditorOverlay
             isOpen: true,
             backdropBlur: 12,
           });
+          setIsExpanded(false);
         });
       });
     } else {
@@ -695,12 +786,82 @@ export function EditorOverlay({ promptId, originCardId, onClose }: EditorOverlay
         isOpen: true,
         backdropBlur: 12,
       });
+      setIsExpanded(false);
     }
   }, [originCardId]);
 
+  const toggleExpanded = () => {
+    if (!animationState) return;
+
+    if (!isExpanded) {
+      const topInset = 8;
+      const sideInset = 8;
+      const bottomInset = 8;
+      setAnimationState({
+        ...animationState,
+        top: topInset,
+        left: sideInset,
+        width: `calc(100vw - ${sideInset * 2}px)`,
+        height: `calc(100vh - ${topInset + bottomInset}px)`,
+        borderRadius: '12px',
+      });
+      setIsExpanded(true);
+      return;
+    }
+
+    const padding = 80;
+    const maxWidth = 1400;
+    const maxHeight = window.innerHeight - padding * 2;
+    const finalWidth = Math.min(window.innerWidth - padding * 2, maxWidth);
+    const finalHeight = maxHeight;
+    const finalLeft = (window.innerWidth - finalWidth) / 2;
+    const finalTop = padding;
+
+    setAnimationState({
+      ...animationState,
+      top: finalTop,
+      left: finalLeft,
+      width: finalWidth,
+      height: finalHeight,
+      borderRadius: '16px',
+    });
+    setIsExpanded(false);
+  };
+
+  const toggleFocusMode = () => {
+    const next = !isFocusMode;
+    setIsFocusMode(next);
+    if (!next) return;
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        const el = scrollableRef.current;
+        if (!el) return;
+        el.scrollTo({ top: 0, behavior: 'smooth' });
+      });
+    });
+  };
+
   // 处理收藏
-  const handleToggleFavorite = async () => {
+  const handleToggleFavorite = async (e: React.MouseEvent) => {
     if (!prompt) return;
+    
+    // 🔥 添加 firework 效果
+    if (!prompt.meta.is_favorite) {
+      const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+      setIsBursting(true);
+      setBurstAnchor({
+        x: rect.left + rect.width / 2,
+        y: rect.top + rect.height / 2,
+      });
+      if (burstTimerRef.current) {
+        window.clearTimeout(burstTimerRef.current);
+      }
+      burstTimerRef.current = window.setTimeout(() => {
+        setIsBursting(false);
+        setBurstAnchor(null);
+        burstTimerRef.current = null;
+      }, 600);
+    }
     
     const updated = {
       ...prompt,
@@ -709,7 +870,7 @@ export function EditorOverlay({ promptId, originCardId, onClose }: EditorOverlay
     
     try {
       await savePrompt(updated);
-      showToast(updated.meta.is_favorite ? "已添加到收藏" : "已取消收藏", 'success');
+      // 移除 toast 提示
     } catch (error) {
       showToast("操作失败", 'error');
     }
@@ -717,22 +878,12 @@ export function EditorOverlay({ promptId, originCardId, onClose }: EditorOverlay
 
   // 处理删除
   const handleDelete = async () => {
-    const confirmed = await confirm({
-      title: '删除提示词',
-      message: '确定要删除这个提示词吗？',
-      confirmText: '删除',
-      cancelText: '取消',
-      type: 'warning'
-    });
-    
-    if (confirmed) {
-      try {
-        await deletePrompt(promptId, false);
-        showToast("已移动到回收站", 'success');
-        onClose();
-      } catch (error) {
-        showToast("删除失败", 'error');
-      }
+    try {
+      await deletePrompt(promptId, false);
+      showToast("已移动到回收站，可从回收站恢复", 'success');
+      onClose();
+    } catch (error) {
+      showToast("删除失败", 'error');
     }
   };
 
@@ -912,6 +1063,21 @@ export function EditorOverlay({ promptId, originCardId, onClose }: EditorOverlay
             gap: '8px'
           }}>
             <button 
+              onClick={toggleExpanded}
+              style={{
+                padding: '8px',
+                borderRadius: '8px',
+                border: 'none',
+                backgroundColor: 'rgba(0,0,0,0.05)',
+                color: theme === 'dark' ? '#ffffff' : '#000000',
+                cursor: 'pointer'
+              }}
+              aria-label={isExpanded ? '退出全屏' : '全屏'}
+              title={isExpanded ? '退出全屏' : '全屏'}
+            >
+              {isExpanded ? <Minimize2 size={18} /> : <Maximize2 size={18} />}
+            </button>
+            <button 
               onClick={handleToggleFavorite}
               style={{
                 padding: '8px',
@@ -922,7 +1088,11 @@ export function EditorOverlay({ promptId, originCardId, onClose }: EditorOverlay
                 cursor: 'pointer'
               }}
             >
-              <Star size={18} fill={prompt.meta.is_favorite ? "currentColor" : "none"} />
+              <Star 
+                size={18} 
+                fill={prompt.meta.is_favorite ? "currentColor" : "none"}
+                className={isBursting ? 'star-bounce' : undefined}
+              />
             </button>
             <button 
               onClick={handleCopy}
@@ -972,231 +1142,272 @@ export function EditorOverlay({ promptId, originCardId, onClose }: EditorOverlay
             style={{
               flex: 1,
               overflowY: 'auto',
-              padding: '48px 48px 48px 48px'
+              padding: isExpanded || isFocusMode ? '72px 48px 48px 48px' : '48px 48px 48px 48px'
             }}
           >
-            {/* 头部信息区 */}
-            <div style={{ marginBottom: '32px' }}>
-              {/* 大图标 */}
-              <div 
+            <div style={{ minHeight: '100%', display: 'flex', flexDirection: 'column' }}>
+              {/* 头部信息区 */}
+              <div
                 style={{
-                  width: '64px',
-                  height: '64px',
-                  borderRadius: '16px',
-                  backgroundImage: gradient.backgroundImage,
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  alignSelf: 'flex-start',
-                  boxShadow: gradient.boxShadow,
-                  border: gradient.border,
-                  marginBottom: '24px'
+                  marginBottom: isFocusMode ? '0px' : '32px',
+                  maxHeight: isFocusMode ? '0px' : '2000px',
+                  opacity: isFocusMode ? 0 : 1,
+                  overflow: 'hidden',
+                  transition: 'max-height 0.26s cubic-bezier(0.2, 0.8, 0.2, 1), opacity 0.18s ease, margin-bottom 0.18s ease',
                 }}
               >
-                <Icon size={32} style={{ color: gradient.iconColor }} />
-              </div>
-
-              {/* 无边框大标题 */}
-              <input 
-                style={{
-                  fontSize: '2.25rem',
-                  fontWeight: 700,
-                  lineHeight: 1.2,
-                  background: 'transparent',
-                  border: 'none',
-                  outline: 'none',
-                  width: '100%',
-                  color: theme === 'dark' ? '#ffffff' : '#000000',
-                  marginBottom: '32px'
-                }}
-                value={title}
-                onChange={(e) => setTitle(e.target.value)}
-                placeholder="无标题"
-              />
-
-              {/* 属性列表 */}
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', fontSize: '14px' }}>
-                {/* 更新时间 */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-                  <div style={{ 
-                    color: theme === 'dark' ? 'rgba(255,255,255,0.6)' : 'rgba(0,0,0,0.6)',
-                    width: '100px',
+                {/* 大图标 */}
+                <div 
+                  style={{
+                    width: '64px',
+                    height: '64px',
+                    borderRadius: '16px',
+                    backgroundImage: gradient.backgroundImage,
                     display: 'flex',
                     alignItems: 'center',
-                    gap: '8px'
-                  }}>
-                    <Calendar size={14} />
-                    <span>Updated</span>
-                  </div>
-                  <div>
-                    {new Date(prompt.meta.updated_at).toLocaleDateString('zh-CN', {
-                      year: 'numeric',
-                      month: 'long',
-                      day: 'numeric'
-                    })}
-                  </div>
+                    justifyContent: 'center',
+                    alignSelf: 'flex-start',
+                    boxShadow: gradient.boxShadow,
+                    border: gradient.border,
+                    marginBottom: '24px'
+                  }}
+                >
+                  <Icon size={32} style={{ color: gradient.iconColor }} />
                 </div>
 
-                {/* 分类 */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-                  <div style={{ 
-                    color: theme === 'dark' ? 'rgba(255,255,255,0.6)' : 'rgba(0,0,0,0.6)',
-                    width: '100px',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '8px'
-                  }}>
-                    <Folder size={14} />
-                    <span>Category</span>
+                {/* 无边框大标题 */}
+                <input 
+                  style={{
+                    fontSize: '2.25rem',
+                    fontWeight: 700,
+                    lineHeight: 1.2,
+                    background: 'transparent',
+                    border: 'none',
+                    outline: 'none',
+                    width: '100%',
+                    color: theme === 'dark' ? '#ffffff' : '#000000',
+                    marginBottom: '32px'
+                  }}
+                  value={title}
+                  onChange={(e) => setTitle(e.target.value)}
+                  placeholder="无标题"
+                />
+
+                {/* 属性列表 */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', fontSize: '14px' }}>
+                  {/* 更新时间 */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+                    <div style={{ 
+                      color: theme === 'dark' ? 'rgba(255,255,255,0.6)' : 'rgba(0,0,0,0.6)',
+                      width: '100px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '8px'
+                    }}>
+                      <Calendar size={14} />
+                      <span>Updated</span>
+                    </div>
+                    <div>
+                      {new Date(prompt.meta.updated_at).toLocaleDateString('zh-CN', {
+                        year: 'numeric',
+                        month: 'long',
+                        day: 'numeric'
+                      })}
+                    </div>
                   </div>
-                  <div style={{ flex: 1 }}>
-                    <CategorySelector 
-                      currentCategory={category}
-                      onCategoryChange={async (newCategoryName) => {
-                        if (!prompt || !state.fileSystem) return;
-                        
-                        try {
-                          let newCategoryPath = state.fileSystem.root; // 默认为根目录（无分类）
-                          const prevCategoryName = category;
+
+                  {/* 分类 */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+                    <div style={{ 
+                      color: theme === 'dark' ? 'rgba(255,255,255,0.6)' : 'rgba(0,0,0,0.6)',
+                      width: '100px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '8px'
+                    }}>
+                      <Folder size={14} />
+                      <span>Category</span>
+                    </div>
+                    <div style={{ flex: 1 }}>
+                      <CategorySelector 
+                        currentCategory={category}
+                        onCategoryChange={async (newCategoryName) => {
+                          if (!prompt || !state.fileSystem) return;
                           
-                          if (newCategoryName) {
-                            // 有分类：递归查找分类路径
-                            const findCategoryPath = (categories: any[], targetName: string): string | null => {
-                              for (const cat of categories) {
-                                if (cat.name === targetName) {
-                                  return cat.path;
+                          try {
+                            let newCategoryPath = state.fileSystem.root; // 默认为根目录（无分类）
+                            const prevCategoryName = category;
+                            
+                            if (newCategoryName) {
+                              // 有分类：递归查找分类路径
+                              const findCategoryPath = (categories: any[], targetName: string): string | null => {
+                                for (const cat of categories) {
+                                  if (cat.name === targetName) {
+                                    return cat.path;
+                                  }
+                                  if (cat.children && cat.children.length > 0) {
+                                    const found = findCategoryPath(cat.children, targetName);
+                                    if (found) return found;
+                                  }
                                 }
-                                if (cat.children && cat.children.length > 0) {
-                                  const found = findCategoryPath(cat.children, targetName);
-                                  if (found) return found;
-                                }
+                                return null;
+                              };
+                              const foundPath = findCategoryPath(state.fileSystem.categories, newCategoryName);
+                              if (foundPath) {
+                                newCategoryPath = foundPath;
+                              } else {
+                                throw new Error('分类不存在');
                               }
-                              return null;
+                            }
+                            // 如果 newCategoryName 为空，newCategoryPath 已经是根目录，表示"无分类"
+
+                            // 同步 tags：分类视为一个系统标签（与“新建”一致）
+                            const currentTags = Array.isArray(prompt.meta.tags) ? prompt.meta.tags : [];
+                            const preserved = currentTags.filter((t) => {
+                              if (!t) return false;
+                              if (prevCategoryName && normalizeTagKey(t) === normalizeTagKey(prevCategoryName)) return false;
+                              if (newCategoryName && normalizeTagKey(t) === normalizeTagKey(newCategoryName)) return false;
+                              return true;
+                            });
+                            const nextTags = newCategoryName ? dedupeTags([newCategoryName, ...preserved]) : dedupeTags(preserved);
+                            
+                            // 更新提示词，包括分类路径
+                            const updated = {
+                              ...prompt,
+                              meta: { 
+                                ...prompt.meta, 
+                                category: newCategoryName || '', // 无分类时为空字符串
+                                category_path: newCategoryPath,
+                                tags: nextTags,
+                              }
                             };
-                            const foundPath = findCategoryPath(state.fileSystem.categories, newCategoryName);
-                            if (foundPath) {
-                              newCategoryPath = foundPath;
-                            } else {
-                              throw new Error('分类不存在');
-                            }
+                            
+                            await savePrompt(updated);
+                            setCategory(newCategoryName || ''); // 更新本地状态
+                            setTags(nextTags); // 标签栏同步更新
+                            
+                            const message = newCategoryName ? `已移动到"${newCategoryName}"分类` : '已移动到根目录（无分类）';
+                            showToast(message, 'success');
+                          } catch (error) {
+                            showToast(`更新失败: ${(error as Error).message}`, 'error');
                           }
-                          // 如果 newCategoryName 为空，newCategoryPath 已经是根目录，表示"无分类"
-
-                          // 同步 tags：分类视为一个系统标签（与“新建”一致）
-                          const currentTags = Array.isArray(prompt.meta.tags) ? prompt.meta.tags : [];
-                          const preserved = currentTags.filter((t) => {
-                            if (!t) return false;
-                            if (prevCategoryName && normalizeTagKey(t) === normalizeTagKey(prevCategoryName)) return false;
-                            if (newCategoryName && normalizeTagKey(t) === normalizeTagKey(newCategoryName)) return false;
-                            return true;
-                          });
-                          const nextTags = newCategoryName ? dedupeTags([newCategoryName, ...preserved]) : dedupeTags(preserved);
-                          
-                          // 更新提示词，包括分类路径
-                          const updated = {
-                            ...prompt,
-                            meta: { 
-                              ...prompt.meta, 
-                              category: newCategoryName || '', // 无分类时为空字符串
-                              category_path: newCategoryPath,
-                              tags: nextTags,
-                            }
-                          };
-                          
-                          await savePrompt(updated);
-                          setCategory(newCategoryName || ''); // 更新本地状态
-                          setTags(nextTags); // 标签栏同步更新
-                          
-                          const message = newCategoryName ? `已移动到"${newCategoryName}"分类` : '已移动到根目录（无分类）';
-                          showToast(message, 'success');
-                        } catch (error) {
-                          showToast(`更新失败: ${(error as Error).message}`, 'error');
-                        }
-                      }}
-                      theme={theme}
-                      vaultRoot={state.fileSystem?.root || ''}
-                    />
+                        }}
+                        theme={theme}
+                        vaultRoot={state.fileSystem?.root || ''}
+                      />
+                    </div>
                   </div>
-                </div>
 
-                {/* 标签栏 */}
-                <div style={{ display: 'flex', alignItems: 'flex-start', gap: '16px' }}>
-                  <div style={{ 
-                    color: theme === 'dark' ? 'rgba(255,255,255,0.6)' : 'rgba(0,0,0,0.6)',
-                    width: '100px',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '8px',
-                    paddingTop: '4px'
-                  }}>
-                    <Hash size={14} />
-                    <span>Tags</span>
-                  </div>
-                  <div style={{ flex: 1 }}>
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', alignItems: 'center' }}>
-                      {/* 现有标签 */}
-                      {tags.map(tag => (
-                        <span 
-                          key={tag} 
-                          className={`${getTagStyle(tag)}`}
-                          style={{
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            gap: '4px',
-                            fontSize: '12px',
-                            padding: '6px 10px',
-                            borderRadius: '6px',
-                            cursor: 'pointer',
-                            transition: 'all 0.2s ease',
-                            userSelect: 'none',
-                            maxWidth: '180px'
-                          }}
-                          onClick={() => handleRemoveTag(tag)}
-                          onMouseEnter={(e) => {
-                            e.currentTarget.style.transform = 'scale(0.95)';
-                            e.currentTarget.style.opacity = '0.8';
-                          }}
-                          onMouseLeave={(e) => {
-                            e.currentTarget.style.transform = 'scale(1)';
-                            e.currentTarget.style.opacity = '1';
-                          }}
-                        >
-                          <span style={{
-                            overflow: 'hidden',
-                            textOverflow: 'ellipsis',
-                            whiteSpace: 'nowrap',
-                            maxWidth: '140px'
-                          }}>{tag}</span>
-                          <X size={10} style={{ opacity: 0.7 }} />
-                        </span>
-                      ))}
-                      
-                      {/* 添加标签区域 */}
-                      {isAddingTag ? (
-                        /* 输入状态 */
-                        <div
-                          style={{
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            backgroundColor: theme === 'dark' ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.03)',
-                            border: `1px solid ${theme === 'dark' ? 'rgba(255,255,255,0.15)' : 'rgba(0,0,0,0.15)'}`,
-                            borderRadius: '6px',
-                            height: '28px',
-                            overflow: 'hidden',
-                            width: `${tagInputWidth}px`,
-                            transition: 'width 0.22s cubic-bezier(0.2, 0.8, 0.2, 1)',
-                          }}
-                          onTransitionEnd={async (e) => {
-                            if (e.propertyName !== 'width') return;
-                            if (!isTagCommitting) return;
-                            if (!pendingTagToAdd) return;
-                            if (!prompt) return;
+                  {/* 标签栏 */}
+                  <div style={{ display: 'flex', alignItems: 'flex-start', gap: '16px' }}>
+                    <div style={{ 
+                      color: theme === 'dark' ? 'rgba(255,255,255,0.6)' : 'rgba(0,0,0,0.6)',
+                      width: '100px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '8px',
+                      paddingTop: '4px'
+                    }}>
+                      <Hash size={14} />
+                      <span>Tags</span>
+                    </div>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', alignItems: 'center' }}>
+                        {/* 现有标签 */}
+                        {tags.map(tag => (
+                          <span 
+                            key={tag} 
+                            className={`${getTagStyle(tag)}`}
+                            style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '4px',
+                              fontSize: '12px',
+                              padding: '6px 10px',
+                              borderRadius: '6px',
+                              cursor: 'pointer',
+                              transition: 'all 0.2s ease',
+                              userSelect: 'none',
+                              maxWidth: '180px'
+                            }}
+                            onClick={() => handleRemoveTag(tag)}
+                            onMouseEnter={(e) => {
+                              e.currentTarget.style.transform = 'scale(0.95)';
+                              e.currentTarget.style.opacity = '0.8';
+                            }}
+                            onMouseLeave={(e) => {
+                              e.currentTarget.style.transform = 'scale(1)';
+                              e.currentTarget.style.opacity = '1';
+                            }}
+                          >
+                            <span style={{
+                              overflow: 'hidden',
+                              textOverflow: 'ellipsis',
+                              whiteSpace: 'nowrap',
+                              maxWidth: '140px'
+                            }}>{tag}</span>
+                            <X size={10} style={{ opacity: 0.7 }} />
+                          </span>
+                        ))}
+                        
+                        {/* 添加标签区域 */}
+                        {isAddingTag ? (
+                          /* 输入状态 */
+                          <div
+                            style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              backgroundColor: theme === 'dark' ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.03)',
+                              border: `1px solid ${theme === 'dark' ? 'rgba(255,255,255,0.15)' : 'rgba(0,0,0,0.15)'}`,
+                              borderRadius: '6px',
+                              height: '28px',
+                              overflow: 'hidden',
+                              width: `${tagInputWidth}px`,
+                              transition: 'width 0.22s cubic-bezier(0.2, 0.8, 0.2, 1)',
+                            }}
+                            onTransitionEnd={async (e) => {
+                              if (e.propertyName !== 'width') return;
+                              if (!isTagCommitting) return;
+                              if (!pendingTagToAdd) return;
+                              if (!prompt) return;
 
-                            const name = pendingTagToAdd;
-                            // 去重（大小写不敏感）+ 分类标签置顶
-                            const key = normalizeTagKey(name);
-                            const exists = tags.some((t) => normalizeTagKey(t) === key);
-                            if (exists) {
+                              const name = pendingTagToAdd;
+                              // 去重（大小写不敏感）+ 分类标签置顶
+                              const key = normalizeTagKey(name);
+                              const exists = tags.some((t) => normalizeTagKey(t) === key);
+                              if (exists) {
+                                setIsTagCommitting(false);
+                                setPendingTagToAdd(null);
+                                setTagInputWidth(28);
+                                setTimeout(() => {
+                                  setIsAddingTag(false);
+                                  setNewTag('');
+                                }, 160);
+                                return;
+                              }
+
+                              const nextTags = dedupeTags([...tags, name]);
+                              if (category) {
+                                nextTags.sort((a, b) => {
+                                  if (normalizeTagKey(a) === normalizeTagKey(category)) return -1;
+                                  if (normalizeTagKey(b) === normalizeTagKey(category)) return 1;
+                                  return 0;
+                                });
+                              }
+                              const updated = {
+                                ...prompt,
+                                meta: {
+                                  ...prompt.meta,
+                                  tags: nextTags,
+                                },
+                              };
+                              try {
+                                await savePrompt(updated);
+                                setTags(nextTags);
+                              } catch (error) {
+                                showToast(`添加标签失败: ${(error as Error).message}`, 'error');
+                              }
+
                               setIsTagCommitting(false);
                               setPendingTagToAdd(null);
                               setTagInputWidth(28);
@@ -1204,179 +1415,186 @@ export function EditorOverlay({ promptId, originCardId, onClose }: EditorOverlay
                                 setIsAddingTag(false);
                                 setNewTag('');
                               }, 160);
-                              return;
-                            }
-
-                            const nextTags = dedupeTags([...tags, name]);
-                            if (category) {
-                              nextTags.sort((a, b) => {
-                                if (normalizeTagKey(a) === normalizeTagKey(category)) return -1;
-                                if (normalizeTagKey(b) === normalizeTagKey(category)) return 1;
-                                return 0;
-                              });
-                            }
-                            const updated = {
-                              ...prompt,
-                              meta: {
-                                ...prompt.meta,
-                                tags: nextTags,
-                              },
-                            };
-                            try {
-                              await savePrompt(updated);
-                              setTags(nextTags);
-                            } catch (error) {
-                              showToast(`添加标签失败: ${(error as Error).message}`, 'error');
-                            }
-
-                            setIsTagCommitting(false);
-                            setPendingTagToAdd(null);
-                            setTagInputWidth(28);
-                            setTimeout(() => {
-                              setIsAddingTag(false);
-                              setNewTag('');
-                            }, 160);
-                          }}
-                        >
-                          {/* 左侧 + 按钮（固定） */}
-                          <button
-                            onClick={() => {
-                              if (isTagCommitting) return;
-                              cancelAddTag();
                             }}
+                          >
+                            {/* 左侧 + 按钮（固定） */}
+                            <button
+                              onClick={() => {
+                                if (isTagCommitting) return;
+                                cancelAddTag();
+                              }}
+                              style={{
+                                width: '28px',
+                                height: '28px',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                border: 'none',
+                                background: 'transparent',
+                                cursor: isTagCommitting ? 'default' : 'pointer',
+                                color: theme === 'dark' ? 'rgba(255,255,255,0.7)' : 'rgba(0,0,0,0.65)',
+                                flexShrink: 0,
+                              }}
+                              aria-label="取消新增标签"
+                            >
+                              +
+                            </button>
+
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', paddingRight: '8px' }}>
+                              {isTagCommitting ? (
+                                <span
+                                  style={{
+                                    fontSize: '12px',
+                                    color: theme === 'dark' ? '#ffffff' : '#000000',
+                                    overflow: 'hidden',
+                                    textOverflow: 'ellipsis',
+                                    whiteSpace: 'nowrap',
+                                    maxWidth: '140px',
+                                  }}
+                                >
+                                  {(pendingTagToAdd || '').trim()}
+                                </span>
+                              ) : (
+                                <input
+                                  ref={tagInputRef}
+                                  type="text"
+                                  value={newTag}
+                                  onChange={(e) => setNewTag(e.target.value)}
+                                  onKeyDown={(e) => {
+                                    if (e.key === 'Enter') {
+                                      commitAddTag();
+                                    } else if (e.key === 'Escape') {
+                                      cancelAddTag();
+                                    }
+                                  }}
+                                  onBlur={() => {
+                                    // mac 风格：失焦自动提交（有内容则创建，无内容则收起）
+                                    commitAddTag();
+                                  }}
+                                  placeholder="标签名"
+                                  style={{
+                                    background: 'transparent',
+                                    border: 'none',
+                                    outline: 'none',
+                                    fontSize: '12px',
+                                    color: theme === 'dark' ? '#ffffff' : '#000000',
+                                    width: '100%',
+                                    minWidth: '60px',
+                                  }}
+                                />
+                              )}
+                            </div>
+                          </div>
+                        ) : (
+                          /* 添加按钮状态 */
+                          <button
+                            onClick={openAddTag}
                             style={{
-                              width: '28px',
-                              height: '28px',
-                              display: 'flex',
+                              display: 'inline-flex',
                               alignItems: 'center',
                               justifyContent: 'center',
-                              border: 'none',
-                              background: 'transparent',
-                              cursor: isTagCommitting ? 'default' : 'pointer',
-                              color: theme === 'dark' ? 'rgba(255,255,255,0.7)' : 'rgba(0,0,0,0.65)',
-                              flexShrink: 0,
+                              width: '28px',
+                              height: '28px',
+                              borderRadius: '6px',
+                              border: `1px dashed ${theme === 'dark' ? 'rgba(255,255,255,0.3)' : 'rgba(0,0,0,0.3)'}`,
+                              backgroundColor: 'transparent',
+                              color: theme === 'dark' ? 'rgba(255,255,255,0.6)' : 'rgba(0,0,0,0.6)',
+                              cursor: 'pointer',
+                              fontSize: '14px',
+                              fontWeight: 'bold',
+                              transition: 'all 0.18s ease',
+                              userSelect: 'none'
                             }}
-                            aria-label="取消新增标签"
+                            onMouseEnter={(e) => {
+                              e.currentTarget.style.borderColor = theme === 'dark' ? 'rgba(255,255,255,0.5)' : 'rgba(0,0,0,0.5)';
+                              e.currentTarget.style.backgroundColor = theme === 'dark' ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.03)';
+                              e.currentTarget.style.color = theme === 'dark' ? 'rgba(255,255,255,0.8)' : 'rgba(0,0,0,0.8)';
+                            }}
+                            onMouseLeave={(e) => {
+                              e.currentTarget.style.borderColor = theme === 'dark' ? 'rgba(255,255,255,0.3)' : 'rgba(0,0,0,0.3)';
+                              e.currentTarget.style.backgroundColor = 'transparent';
+                              e.currentTarget.style.color = theme === 'dark' ? 'rgba(255,255,255,0.6)' : 'rgba(0,0,0,0.6)';
+                            }}
+                            aria-label="新增标签"
                           >
                             +
                           </button>
-
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', paddingRight: '8px' }}>
-                            {isTagCommitting ? (
-                              <span
-                                style={{
-                                  fontSize: '12px',
-                                  color: theme === 'dark' ? '#ffffff' : '#000000',
-                                  overflow: 'hidden',
-                                  textOverflow: 'ellipsis',
-                                  whiteSpace: 'nowrap',
-                                  maxWidth: '140px',
-                                }}
-                              >
-                                {(pendingTagToAdd || '').trim()}
-                              </span>
-                            ) : (
-                              <input
-                                ref={tagInputRef}
-                                type="text"
-                                value={newTag}
-                                onChange={(e) => setNewTag(e.target.value)}
-                                onKeyDown={(e) => {
-                                  if (e.key === 'Enter') {
-                                    commitAddTag();
-                                  } else if (e.key === 'Escape') {
-                                    cancelAddTag();
-                                  }
-                                }}
-                                onBlur={() => {
-                                  // mac 风格：失焦自动提交（有内容则创建，无内容则收起）
-                                  commitAddTag();
-                                }}
-                                placeholder="标签名"
-                                style={{
-                                  background: 'transparent',
-                                  border: 'none',
-                                  outline: 'none',
-                                  fontSize: '12px',
-                                  color: theme === 'dark' ? '#ffffff' : '#000000',
-                                  width: '100%',
-                                  minWidth: '60px',
-                                }}
-                              />
-                            )}
-                          </div>
-                        </div>
-                      ) : (
-                        /* 添加按钮状态 */
-                        <button
-                          onClick={openAddTag}
-                          style={{
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            width: '28px',
-                            height: '28px',
-                            borderRadius: '6px',
-                            border: `1px dashed ${theme === 'dark' ? 'rgba(255,255,255,0.3)' : 'rgba(0,0,0,0.3)'}`,
-                            backgroundColor: 'transparent',
-                            color: theme === 'dark' ? 'rgba(255,255,255,0.6)' : 'rgba(0,0,0,0.6)',
-                            cursor: 'pointer',
-                            fontSize: '14px',
-                            fontWeight: 'bold',
-                            transition: 'all 0.18s ease',
-                            userSelect: 'none'
-                          }}
-                          onMouseEnter={(e) => {
-                            e.currentTarget.style.borderColor = theme === 'dark' ? 'rgba(255,255,255,0.5)' : 'rgba(0,0,0,0.5)';
-                            e.currentTarget.style.backgroundColor = theme === 'dark' ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.03)';
-                            e.currentTarget.style.color = theme === 'dark' ? 'rgba(255,255,255,0.8)' : 'rgba(0,0,0,0.8)';
-                          }}
-                          onMouseLeave={(e) => {
-                            e.currentTarget.style.borderColor = theme === 'dark' ? 'rgba(255,255,255,0.3)' : 'rgba(0,0,0,0.3)';
-                            e.currentTarget.style.backgroundColor = 'transparent';
-                            e.currentTarget.style.color = theme === 'dark' ? 'rgba(255,255,255,0.6)' : 'rgba(0,0,0,0.6)';
-                          }}
-                          aria-label="新增标签"
-                        >
-                          +
-                        </button>
-                      )}
+                        )}
+                      </div>
                     </div>
                   </div>
                 </div>
               </div>
-            </div>
 
-            {/* 分割线 */}
-            <div style={{
-              height: '1px',
-              width: '100%',
-              backgroundColor: theme === 'dark' ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)',
-              marginBottom: '32px'
-            }} />
+              {/* 分割线 */}
+              <div style={{
+                height: '1px',
+                width: '100%',
+                backgroundColor: theme === 'dark' ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)',
+                marginBottom: isFocusMode ? '16px' : '32px',
+                maxHeight: isFocusMode ? '0px' : '1px',
+                opacity: isFocusMode ? 0 : 1,
+                overflow: 'hidden',
+                transition: 'max-height 0.22s cubic-bezier(0.2, 0.8, 0.2, 1), opacity 0.18s ease, margin-bottom 0.18s ease',
+              }} />
 
-            {/* 正文编辑区 */}
-            <div style={{ maxWidth: '1200px' }}>
-              <textarea 
-                style={{
-                  fontSize: '1.125rem',
-                  lineHeight: 1.7,
-                  resize: 'none',
-                  minHeight: '500px',
-                  background: 'transparent',
-                  border: 'none',
-                  outline: 'none',
-                  width: '100%',
-                  color: theme === 'dark' ? '#ffffff' : '#000000'
-                }}
-                value={content}
-                onChange={(e) => setContent(e.target.value)}
-                placeholder="开始写作..."
-              />
+              {/* 正文编辑区 */}
+              <div style={{ maxWidth: '1200px', flex: 1, display: 'flex', flexDirection: 'column', width: '100%' }}>
+                <textarea 
+                  style={{
+                    width: '100%',
+                    flex: 1,
+                    minHeight: 0,
+                    fontSize: '16px',
+                    lineHeight: 1.6,
+                    background: 'transparent',
+                    border: 'none',
+                    outline: 'none',
+                    resize: 'none',
+                    fontFamily: 'inherit',
+                    color: theme === 'dark' ? '#ffffff' : '#000000'
+                  }}
+                  value={content}
+                  onChange={(e) => setContent(e.target.value)}
+                  placeholder="开始写作..."
+                  onDoubleClick={(e) => {
+                    e.stopPropagation();
+                    toggleFocusMode();
+                  }}
+                />
+              </div>
             </div>
           </div>
         </div>
       </div>
+
+      {/* 🔥 Firework 粒子效果 */}
+      {burstAnchor && typeof document !== 'undefined' && createPortal(
+        <div
+          style={{
+            position: 'fixed',
+            left: burstAnchor.x,
+            top: burstAnchor.y,
+            width: 0,
+            height: 0,
+            pointerEvents: 'none',
+            zIndex: 1000001,
+          }}
+        >
+          {fireworkParticles.map((p: { tx: string; ty: string; color: string }, idx: number) => (
+            <span
+              key={idx}
+              className="firework-particle"
+              style={{
+                ['--tx' as any]: p.tx,
+                ['--ty' as any]: p.ty,
+                backgroundColor: p.color,
+              }}
+            />
+          ))}
+        </div>,
+        document.body
+      )}
     </>
   );
 }

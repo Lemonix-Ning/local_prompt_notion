@@ -16,9 +16,11 @@ import {
 } from 'lucide-react';
 import { useApp } from '../AppContext';
 import { PromptData } from '../types';
+import { useToast } from '../contexts/ToastContext';
 
 export function Editor() {
   const { state, dispatch, getCurrentPrompt, savePrompt, deletePrompt } = useApp();
+  const { showToast } = useToast();
   const { isEditing } = state;
 
   const currentPrompt = getCurrentPrompt();
@@ -70,26 +72,24 @@ export function Editor() {
     try {
       await savePrompt(formData);
       dispatch({ type: 'SET_EDITING', payload: false });
-      alert('保存成功!');
+      showToast('保存成功!', 'success');
     } catch (error) {
-      alert('保存失败: ' + (error as Error).message);
+      showToast('保存失败: ' + (error as Error).message, 'error');
     }
   };
 
   const handleDelete = async () => {
-    if (confirm('确定要删除这个提示词吗?')) {
-      try {
-        await deletePrompt(formData.meta.id);
-        alert('已移动到回收站');
-      } catch (error) {
-        alert('删除失败: ' + (error as Error).message);
-      }
+    try {
+      await deletePrompt(formData.meta.id);
+      showToast('已移动到回收站，可从回收站恢复', 'success');
+    } catch (error) {
+      showToast('删除失败: ' + (error as Error).message, 'error');
     }
   };
 
   const handleCopy = () => {
     navigator.clipboard.writeText(formData.content);
-    alert('已复制到剪贴板!');
+    showToast('已复制到剪贴板!', 'success');
   };
 
   const handleToggleFavorite = () => {

@@ -123,6 +123,12 @@ function insertCategoryAtPath(
   return false;
 }
 
+function joinCategoryPath(parentPath: string, name: string): string {
+  const trimmedParent = parentPath.replace(/[\\/]+$/, '');
+  const sep = parentPath.includes('\\') ? '\\' : '/';
+  return `${trimmedParent}${sep}${name}`;
+}
+
 /**
  * 初始状态
  */
@@ -135,7 +141,7 @@ const initialState: AppState = {
   filterTags: [],
   sortBy: 'updated',
   uiState: {
-    sidebarOpen: true,
+    sidebarOpen: false,
     editorMode: 'edit',
     isLoading: false,
     newPromptModal: {
@@ -408,8 +414,17 @@ export function AppProvider({ children, adapter }: AppProviderProps) {
    */
   const savePrompt = async (prompt: PromptData) => {
     try {
+      const before = state.fileSystem?.allPrompts.get(prompt.meta.id);
+      const beforePath = before?.path;
+      const beforeCategoryPath = before?.meta.category_path;
       await adapter.savePrompt(prompt);
       dispatch({ type: 'UPDATE_PROMPT', payload: prompt });
+      const moved =
+        (beforePath && prompt.path && beforePath !== prompt.path) ||
+        (beforeCategoryPath && prompt.meta.category_path && beforeCategoryPath !== prompt.meta.category_path);
+      if (moved) {
+        await refreshVault();
+      }
     } catch (error) {
       console.error('Error saving prompt:', error);
       throw error;
@@ -468,9 +483,46 @@ export function AppProvider({ children, adapter }: AppProviderProps) {
 
   const createCategory = async (parentPath: string, name: string) => {
     try {
+      // 方案 1：前端乐观更新，立即插入分类节点，避免全量扫描造成的卡顿
+      if (state.fileSystem) {
+        const newCategoryPath = joinCategoryPath(parentPath, name);
+        const optimisticNode: CategoryNode = {
+          name,
+          path: newCategoryPath,
+          children: [],
+          prompts: [],
+        };
+
+        // 深拷贝 categories，保持 allPrompts Map 类型
+        const updatedFileSystem: FileSystemState = {
+          root: state.fileSystem.root,
+          categories: JSON.parse(JSON.stringify(state.fileSystem.categories)),
+          allPrompts: new Map(state.fileSystem.allPrompts),
+        };
+
+        const inserted = insertCategoryAtPath(
+          updatedFileSystem.categories,
+          parentPath,
+          optimisticNode,
+          state.fileSystem.root
+        );
+
+        if (inserted) {
+          dispatch({ type: 'LOAD_VAULT', payload: updatedFileSystem });
+        }
+      }
+
       await adapter.createCategory(parentPath, name);
-      await refreshVault();
+
+      // 单次后台校验刷新，确保与磁盘一致（失败也不会阻塞 UI）
+      setTimeout(() => {
+        refreshVault().catch(() => {
+          // ignore background refresh error
+        });
+      }, 500);
     } catch (error) {
+      // 回滚：创建失败时，以后端为准重新刷新
+      await refreshVault();
       console.error('Error creating category:', error);
       throw error;
     }

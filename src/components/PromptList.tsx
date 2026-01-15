@@ -20,7 +20,8 @@ import {
   PanelLeftOpen,
 } from 'lucide-react';
 import { useApp } from '../AppContext';
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 // EditorPage 现在通过 EditorOverlay 系统使用，不再直接导入
 import api from '../api/client';
 import { getSmartIcon } from '../utils/smartIcon';
@@ -29,6 +30,9 @@ import { useToast } from '../contexts/ToastContext';
 import { useConfirm } from '../contexts/ConfirmContext';
 import { Button } from './Button';
 import { NewPromptOverlay } from './NewPromptOverlay';
+import { ElasticScroll } from './ElasticScroll';
+import { EmptyState } from './EmptyState';
+import { DisintegrateOverlay } from './DisintegrateOverlay';
 
 function SpotlightCard({
   children,
@@ -41,18 +45,64 @@ function SpotlightCard({
 }) {
   const [position, setPosition] = useState({ x: 0, y: 0 });
   const [opacity, setOpacity] = useState(0);
+  const [tiltStyle, setTiltStyle] = useState({
+    transform: 'perspective(1000px) rotateX(0deg) rotateY(0deg) scale3d(1, 1, 1)',
+    '--sheen-bg': 'none',
+  } as React.CSSProperties & { '--sheen-bg': string });
+  const cardRef = useRef<HTMLDivElement>(null);
+
+  const handleMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
+    const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    
+    setPosition({ x, y });
+
+    // 🔥 3D Tilt 计算
+    // 归一化坐标 (-1 ~ 1)
+    const normalizedX = (x - rect.width / 2) / (rect.width / 2);
+    const normalizedY = (y - rect.height / 2) / (rect.height / 2);
+
+    // 计算旋转角度 (强度系数 8deg)
+    const rotateX = -normalizedY * 8;
+    const rotateY = normalizedX * 8;
+
+    // 计算高光位置 (百分比)
+    const sheenX = 50 + normalizedX * 35;
+    const sheenY = 50 + normalizedY * 35;
+
+    setTiltStyle({
+      transform: `perspective(1000px) rotateX(${rotateX}deg) rotateY(${rotateY}deg) scale3d(1.01, 1.01, 1.01)`,
+      '--sheen-bg': `radial-gradient(circle at ${sheenX}% ${sheenY}%, rgba(255,255,255,0.15) 0%, transparent 50%)`,
+    });
+  };
+
+  const handleMouseLeave = () => {
+    setOpacity(0);
+    setTiltStyle({
+      transform: 'perspective(1000px) rotateX(0deg) rotateY(0deg) scale3d(1, 1, 1)',
+      '--sheen-bg': 'none',
+    });
+  };
 
   return (
     <div
+      ref={cardRef}
       onClick={onClick}
-      onMouseMove={(e) => {
-        const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
-        setPosition({ x: e.clientX - rect.left, y: e.clientY - rect.top });
-      }}
+      onMouseMove={handleMouseMove}
       onMouseEnter={() => setOpacity(1)}
-      onMouseLeave={() => setOpacity(0)}
-      className={`relative rounded-xl border border-border bg-card/50 overflow-hidden group transition-colors ${className || ''}`}
+      onMouseLeave={handleMouseLeave}
+      className={`relative rounded-xl border border-border bg-card/50 overflow-hidden group transition-colors tilt-card ${className || ''}`}
+      style={tiltStyle}
     >
+      {/* 3D 高光层 */}
+      <div
+        className="pointer-events-none absolute -inset-px opacity-0 transition duration-300 group-hover:opacity-100 sheen-layer"
+        style={{
+          background: tiltStyle['--sheen-bg'] as string,
+        }}
+      />
+      
       <div
         className="pointer-events-none absolute -inset-px opacity-0 transition duration-300 group-hover:opacity-100"
         style={{
@@ -68,7 +118,7 @@ function SpotlightCard({
           background: `radial-gradient(600px circle at ${position.x}px ${position.y}px, rgba(0,0,0,0.04), transparent 40%)`,
         }}
       />
-      <div className="relative h-full flex flex-col">{children}</div>
+      <div className="relative h-full flex flex-col content-layer">{children}</div>
     </div>
   );
 }
@@ -106,12 +156,243 @@ export function PromptList() {
   const [isMaximized, setIsMaximized] = useState(false);
   const [isSearchFocused, setIsSearchFocused] = useState(false);
 
+  const [burstingId, setBurstingId] = useState<string | null>(null);
+  const [burstAnchor, setBurstAnchor] = useState<{ id: string; x: number; y: number } | null>(null);
+  const burstTimerRef = useRef<number | null>(null);
+
+  // ========== Keyboard Navigation (键盘导航) ==========
+  const [focusedIndex, setFocusedIndex] = useState<number>(-1);
+  const [columnCount, setColumnCount] = useState<number>(3);
+  const cardRefs = useRef<(HTMLDivElement | null)[]>([]);
+  const [isKeyboardNavigation, setIsKeyboardNavigation] = useState<boolean>(false); // 🔥 新增：标记是否为键盘导航
+  // 编辑器扩展功能（预留）
+  // const [isEditorExpanded, setIsEditorExpanded] = useState(false);
+  // const [editorClickCount, setEditorClickCount] = useState(0);
+  // const editorClickTimerRef = useRef<number | null>(null);
+
+  const fireworkParticles = useMemo(() => {
+    return Array.from({ length: 8 }).map((_, i) => {
+      const angle = (i * 45) * (Math.PI / 180);
+      const distance = 24;
+      const tx = Math.cos(angle) * distance;
+      const ty = Math.sin(angle) * distance;
+      return {
+        tx: `${tx}px`,
+        ty: `${ty}px`,
+        color: i % 2 === 0 ? '#facc15' : '#fb923c',
+      };
+    });
+  }, []);
+
+  // ========== 获取过滤后的提示词列表 (必须在 useEffect 之前) ==========
   const prompts = getFilteredPrompts();
   const isModalOpen = uiState.newPromptModal.isOpen;
   const preselectedCategory = uiState.newPromptModal.preselectedCategory;
 
+  useEffect(() => {
+    return () => {
+      if (burstTimerRef.current) {
+        window.clearTimeout(burstTimerRef.current);
+        burstTimerRef.current = null;
+      }
+    };
+  }, []);
+
+  // ========== 计算网格列数 (Grid Column Count) ==========
+  useEffect(() => {
+    const updateColumnCount = () => {
+      const width = window.innerWidth;
+      if (width >= 1024) {
+        setColumnCount(3); // lg: 3 columns
+      } else if (width >= 768) {
+        setColumnCount(2); // md: 2 columns
+      } else {
+        setColumnCount(1); // sm: 1 column
+      }
+    };
+
+    updateColumnCount();
+    window.addEventListener('resize', updateColumnCount);
+    return () => window.removeEventListener('resize', updateColumnCount);
+  }, []);
+
+  // ========== 同步焦点到 DOM (Sync Focus to DOM) ==========
+  useEffect(() => {
+    // 🔥 只在键盘导航时才滚动到卡片
+    if (isKeyboardNavigation && focusedIndex >= 0 && focusedIndex < cardRefs.current.length) {
+      const card = cardRefs.current[focusedIndex];
+      if (card) {
+        // 不使用 focus()，避免触发浏览器的焦点样式
+        // 只滚动到可见区域
+        card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      }
+    }
+  }, [focusedIndex, isKeyboardNavigation]);
+
+  // ========== 键盘快捷键监听 (Keyboard Shortcuts) ==========
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // 如果正在输入框中，不处理快捷键
+      const target = e.target as HTMLElement;
+      if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') {
+        return;
+      }
+
+      // 如果编辑器打开，处理编辑器内的快捷键
+      if (uiState.editorOverlay.isOpen) {
+        if (e.key === ' ') {
+          e.preventDefault();
+          handleEditorSpaceKey();
+        }
+        return;
+      }
+
+      // 🔥 方向键操作时标记为键盘导航
+      if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
+        setIsKeyboardNavigation(true);
+      }
+
+      // 全局快捷键
+      switch (e.key) {
+        case 'c':
+        case 'C':
+          if (e.ctrlKey || e.metaKey) {
+            // Ctrl+C / Cmd+C: 复制内容
+            if (focusedIndex >= 0 && focusedIndex < prompts.length) {
+              e.preventDefault();
+              const prompt = prompts[focusedIndex];
+              copyPromptContent(prompt.meta.id);
+            }
+          } else {
+            // C: 打开新建模态框
+            e.preventDefault();
+            openNewPrompt();
+          }
+          break;
+
+        case 'Enter':
+          if (focusedIndex >= 0 && focusedIndex < prompts.length) {
+            e.preventDefault();
+            const prompt = prompts[focusedIndex];
+            if (selectedCategory !== 'trash') {
+              handleCardClick(prompt.meta.id);
+            }
+          }
+          break;
+
+        case ' ':
+          if (focusedIndex >= 0 && focusedIndex < prompts.length) {
+            e.preventDefault();
+            const prompt = prompts[focusedIndex];
+            if (selectedCategory !== 'trash') {
+              handleCardClick(prompt.meta.id);
+            }
+          }
+          break;
+
+        case 'ArrowUp':
+          e.preventDefault();
+          setFocusedIndex((prev) => {
+            const newIndex = prev - columnCount;
+            return newIndex >= 0 ? newIndex : prev;
+          });
+          break;
+
+        case 'ArrowDown':
+          e.preventDefault();
+          setFocusedIndex((prev) => {
+            const newIndex = prev + columnCount;
+            return newIndex < prompts.length ? newIndex : prev;
+          });
+          break;
+
+        case 'ArrowLeft':
+          e.preventDefault();
+          setFocusedIndex((prev) => {
+            const newIndex = prev - 1;
+            return newIndex >= 0 ? newIndex : prev;
+          });
+          break;
+
+        case 'ArrowRight':
+          e.preventDefault();
+          setFocusedIndex((prev) => {
+            const newIndex = prev + 1;
+            return newIndex < prompts.length ? newIndex : prev;
+          });
+          break;
+
+        case 'Escape':
+          // 🔥 ESC 键取消选中
+          e.preventDefault();
+          setFocusedIndex(-1);
+          setIsKeyboardNavigation(false);
+          break;
+
+        default:
+          break;
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [focusedIndex, columnCount, prompts, selectedCategory, uiState.editorOverlay.isOpen]);
+
+  // ========== 编辑器空格键处理 (Editor Space Key Handler) ==========
+  const handleEditorSpaceKey = () => {
+    // 编辑器扩展功能（预留）
+    // 可以在这里实现：第一次空格进入编辑，第二次放大，第三次全屏，第四次关闭
+    console.log('Editor space key pressed');
+    /*
+    setEditorClickCount((prev) => {
+      const newCount = prev + 1;
+      
+      // 清除之前的定时器
+      if (editorClickTimerRef.current) {
+        window.clearTimeout(editorClickTimerRef.current);
+      }
+
+      // 设置新的定时器，2秒后重置计数
+      editorClickTimerRef.current = window.setTimeout(() => {
+        setEditorClickCount(0);
+        setIsEditorExpanded(false);
+      }, 2000);
+
+      // 根据点击次数执行不同操作
+      switch (newCount) {
+        case 1:
+          // 第一次：进入编辑模式（已经在编辑模式中）
+          break;
+        case 2:
+          // 第二次：放大编辑器
+          setIsEditorExpanded(true);
+          break;
+        case 3:
+          // 第三次：触发双击效果（可以是全屏或其他操作）
+          // 这里可以添加全屏逻辑
+          break;
+        case 4:
+          // 第四次：回到最初状态
+          setIsEditorExpanded(false);
+          setEditorClickCount(0);
+          dispatch({ type: 'CLOSE_EDITOR_OVERLAY' });
+          break;
+        default:
+          break;
+      }
+
+      return newCount;
+    });
+    */
+  };
+
+  const dragPendingRef = useRef(false);
+  const dragStartPosRef = useRef<{ x: number; y: number } | null>(null);
+  const dragSuppressUntilRef = useRef<number>(0);
+
   const [newPromptOverlayMounted, setNewPromptOverlayMounted] = useState(false);
   const [newPromptOverlayOpen, setNewPromptOverlayOpen] = useState(false);
+  const [contentContextMenu, setContentContextMenu] = useState<{ x: number; y: number } | null>(null);
 
   const getHasAnyDraftContent = (v: { title: string; content: string; category: string; tags: string }) => {
     return Boolean(v.title.trim() || v.content.trim() || v.category.trim() || v.tags.trim());
@@ -135,6 +416,55 @@ export function PromptList() {
         tags: typeof parsed.tags === 'string' ? parsed.tags : prev.tags,
       }));
     } catch {
+    }
+  };
+
+  const handleTitleBarDoubleClick = async (e: React.MouseEvent) => {
+    const target = e.target as HTMLElement;
+    
+    // 忽略按钮、输入框等交互元素的双击
+    if (
+      target.closest('button') ||
+      target.closest('input') ||
+      target.closest('textarea') ||
+      target.closest('select')
+    ) {
+      return;
+    }
+
+    e.preventDefault();
+    e.stopPropagation();
+
+    // 🔥 关键修复：完全禁用拖拽，防止与最大化/还原冲突
+    dragPendingRef.current = false;
+    dragStartPosRef.current = null;
+    // 延长屏蔽时间，确保拖拽不会在最大化/还原后立即触发
+    dragSuppressUntilRef.current = Date.now() + 500;
+
+    try {
+      const { getCurrentWindow } = await import('@tauri-apps/api/window');
+      const appWindow = getCurrentWindow();
+      
+      // 🔥 关键修复：先检查状态，再执行操作，避免状态不一致
+      const maximized = await appWindow.isMaximized();
+      
+      // 添加小延迟，确保 Windows 完成当前操作
+      await new Promise(resolve => setTimeout(resolve, 50));
+      
+      if (maximized) {
+        await appWindow.unmaximize();
+        setIsMaximized(false);
+      } else {
+        await appWindow.maximize();
+        setIsMaximized(true);
+      }
+      
+      // 再次延迟，确保窗口状态稳定
+      await new Promise(resolve => setTimeout(resolve, 100));
+      
+    } catch (error) {
+      console.error('Window maximize/unmaximize error:', error);
+      // 忽略错误，可能不在 Tauri 环境中
     }
   };
 
@@ -171,8 +501,8 @@ export function PromptList() {
     }
   };
 
-  const openNewPrompt = () => {
-    dispatch({ type: 'OPEN_NEW_PROMPT_MODAL' });
+  const openNewPrompt = (preselectCategoryPath?: string | null) => {
+    dispatch({ type: 'OPEN_NEW_PROMPT_MODAL', payload: preselectCategoryPath || undefined });
     setNewPromptOverlayMounted(true);
     setNewPromptOverlayOpen(true);
   };
@@ -290,32 +620,46 @@ export function PromptList() {
     };
   }, [selectedCategory, state.fileSystem?.root]);
 
-  // 窗口控制函数
+  // ========== 窗口控制函数 (Window Control Functions) ==========
   useEffect(() => {
-    // 监听窗口状态变化
-    const checkMaximized = async () => {
-      try {
-        const { getCurrentWindow } = await import('@tauri-apps/api/window');
-        const appWindow = getCurrentWindow();
-        const maximized = await appWindow.isMaximized();
-        setIsMaximized(maximized);
-      } catch (error) {
-        // 忽略错误，可能不在Tauri环境中
+    let unlisten: (() => void) | undefined;
+    let checkTimeout: number | undefined;
+    
+    // 🔥 防抖的状态检查函数
+    const debouncedCheckMaximized = async () => {
+      if (checkTimeout) {
+        window.clearTimeout(checkTimeout);
       }
+      
+      checkTimeout = window.setTimeout(async () => {
+        try {
+          const { getCurrentWindow } = await import('@tauri-apps/api/window');
+          const appWindow = getCurrentWindow();
+          const maximized = await appWindow.isMaximized();
+          setIsMaximized(maximized);
+          
+          // 🔥 关键修复：状态变化后重置拖拽屏蔽
+          if (maximized) {
+            dragSuppressUntilRef.current = Date.now() + 300;
+          }
+        } catch (error) {
+          // 忽略错误，可能不在Tauri环境中
+        }
+      }, 100);
     };
 
-    checkMaximized();
+    // 初始检查
+    debouncedCheckMaximized();
 
     // 监听窗口状态变化事件
-    let unlisten: (() => void) | undefined;
-    
     const setupListener = async () => {
       try {
         const { getCurrentWindow } = await import('@tauri-apps/api/window');
         const appWindow = getCurrentWindow();
         
+        // 监听窗口大小变化
         unlisten = await appWindow.onResized(() => {
-          checkMaximized();
+          debouncedCheckMaximized();
         });
       } catch (error) {
         // 忽略错误
@@ -328,10 +672,18 @@ export function PromptList() {
       if (unlisten) {
         unlisten();
       }
+      if (checkTimeout) {
+        window.clearTimeout(checkTimeout);
+      }
     };
   }, []);
 
   const handleMinimize = async () => {
+    // 🔥 屏蔽拖拽，防止最小化后的状态异常
+    dragSuppressUntilRef.current = Date.now() + 500;
+    dragPendingRef.current = false;
+    dragStartPosRef.current = null;
+    
     try {
       const { getCurrentWindow } = await import('@tauri-apps/api/window');
       const appWindow = getCurrentWindow();
@@ -343,21 +695,121 @@ export function PromptList() {
   };
 
   const handleMaximize = async () => {
+    // 🔥 关键修复：屏蔽拖拽，防止最大化/还原时的冲突
+    dragSuppressUntilRef.current = Date.now() + 500;
+    dragPendingRef.current = false;
+    dragStartPosRef.current = null;
+    
     try {
       const { getCurrentWindow } = await import('@tauri-apps/api/window');
       const appWindow = getCurrentWindow();
+      
+      // 🔥 添加延迟，确保状态稳定
+      await new Promise(resolve => setTimeout(resolve, 50));
+      
       if (isMaximized) {
         await appWindow.unmaximize();
+        setIsMaximized(false);
       } else {
         await appWindow.maximize();
+        setIsMaximized(true);
       }
+      
+      // 🔥 再次延迟，确保窗口状态完全稳定
+      await new Promise(resolve => setTimeout(resolve, 100));
+      
     } catch (error) {
       console.error('Failed to toggle maximize:', error);
       showToast('窗口最大化失败: ' + (error instanceof Error ? error.message : String(error)), 'error');
     }
   };
 
-  const handleDragStart = async (e: React.MouseEvent) => {
+  const handleClose = async () => {
+    console.log('[handleClose] Called');
+    
+    // 简单测试：先用 window.confirm 测试按钮是否工作
+    const useNativeConfirm = false; // 设为 true 可以测试原生对话框
+    
+    if (useNativeConfirm) {
+      const result = window.confirm('最小化到托盘？\n\n点击"确定"最小化到托盘\n点击"取消"完全退出');
+      console.log('[handleClose] native confirm result:', result);
+      
+      if (result) {
+        try {
+          const { getCurrentWindow } = await import('@tauri-apps/api/window');
+          const appWindow = getCurrentWindow();
+          await appWindow.hide();
+        } catch (e) {
+          console.error('[handleClose] hide error:', e);
+        }
+      } else {
+        try {
+          const { invoke } = await import('@tauri-apps/api/core');
+          await invoke('exit_app');
+        } catch (e) {
+          console.error('[handleClose] exit error:', e);
+        }
+      }
+      return;
+    }
+    
+    try {
+      // 弹出确认对话框
+      console.log('[handleClose] Calling confirm...');
+      const result = await confirm({
+        title: '关闭窗口',
+        message: '选择关闭方式：',
+        confirmText: '最小化到托盘',
+        cancelText: '完全退出',
+        type: 'info',
+      });
+      
+      console.log('[handleClose] confirm result:', result);
+      
+      // result 为 true 表示点击了"最小化到托盘"
+      // result 为 false 表示点击了"完全退出"
+      if (result === true) {
+        // 最小化到托盘（隐藏窗口）
+        try {
+          const { getCurrentWindow } = await import('@tauri-apps/api/window');
+          const appWindow = getCurrentWindow();
+          await appWindow.hide();
+          console.log('[handleClose] Window hidden');
+        } catch (hideError) {
+          console.error('[handleClose] Failed to hide window:', hideError);
+        }
+      } else if (result === false) {
+        // 完全退出程序 - 通过 Tauri 命令
+        try {
+          const { invoke } = await import('@tauri-apps/api/core');
+          console.log('[handleClose] Invoking exit_app...');
+          await invoke('exit_app');
+        } catch (invokeError) {
+          console.error('[handleClose] invoke exit_app failed:', invokeError);
+          // 如果 invoke 失败，尝试直接销毁窗口
+          try {
+            const { getCurrentWindow } = await import('@tauri-apps/api/window');
+            const appWindow = getCurrentWindow();
+            await appWindow.destroy();
+          } catch (destroyError) {
+            console.error('[handleClose] destroy also failed:', destroyError);
+          }
+        }
+      }
+      // 如果 result 是其他值（如 undefined），不做任何操作
+    } catch (error) {
+      console.error('[handleClose] Error:', error);
+    }
+  };
+
+  const handleTitleBarPointerDown = (e: React.PointerEvent) => {
+    const now = Date.now();
+    // 🔥 关键修复：在屏蔽期内完全忽略拖拽
+    if (now < dragSuppressUntilRef.current) {
+      e.preventDefault();
+      return;
+    }
+
     const target = e.target as HTMLElement;
     if (
       target.closest('button') ||
@@ -368,24 +820,51 @@ export function PromptList() {
       return;
     }
 
+    // 只记录起点，避免 click 被误判为拖拽启动
+    dragPendingRef.current = true;
+    dragStartPosRef.current = { x: e.clientX, y: e.clientY };
+  };
+
+  const handleTitleBarPointerMove = async (e: React.PointerEvent) => {
+    if (!dragPendingRef.current) return;
+    const start = dragStartPosRef.current;
+    if (!start) return;
+
+    const now = Date.now();
+    // 🔥 关键修复：在屏蔽期内取消拖拽
+    if (now < dragSuppressUntilRef.current) {
+      dragPendingRef.current = false;
+      dragStartPosRef.current = null;
+      return;
+    }
+
+    const dx = e.clientX - start.x;
+    const dy = e.clientY - start.y;
+    // 🔥 增加阈值，避免误触发
+    const threshold = 8;
+    if (Math.abs(dx) < threshold && Math.abs(dy) < threshold) return;
+
+    dragPendingRef.current = false;
+    dragStartPosRef.current = null;
+
     try {
       const { getCurrentWindow } = await import('@tauri-apps/api/window');
       const appWindow = getCurrentWindow();
-      await appWindow.startDragging();
+      
+      // 🔥 关键修复：只在非最大化状态下允许拖拽
+      const maximized = await appWindow.isMaximized();
+      if (!maximized) {
+        await appWindow.startDragging();
+      }
     } catch (error) {
-      console.error('Failed to start dragging window:', error);
+      console.error('Window dragging error:', error);
+      // 忽略错误，可能不在Tauri环境中
     }
   };
 
-  const handleClose = async () => {
-    try {
-      const { getCurrentWindow } = await import('@tauri-apps/api/window');
-      const appWindow = getCurrentWindow();
-      await appWindow.close();
-    } catch (error) {
-      console.error('Failed to close window:', error);
-      showToast('关闭窗口失败: ' + (error instanceof Error ? error.message : String(error)), 'error');
-    }
+  const handleTitleBarPointerUp = () => {
+    dragPendingRef.current = false;
+    dragStartPosRef.current = null;
   };
 
   const getTrashItemName = (promptPath: string): string | null => {
@@ -505,10 +984,16 @@ export function PromptList() {
       .catch(() => showToast("复制失败", 'error'));
   };
 
+  const copyPromptContent = (promptId: string) => {
+    const prompt = state.fileSystem?.allPrompts.get(promptId);
+    if (!prompt) return;
+    handleCopy(prompt.content);
+  };
+
   const toggleFavorite = async (promptId: string) => {
     const prompt = state.fileSystem?.allPrompts.get(promptId);
     if (!prompt) return;
-    
+
     const updated = {
       ...prompt,
       meta: { ...prompt.meta, is_favorite: !prompt.meta.is_favorite }
@@ -516,10 +1001,13 @@ export function PromptList() {
     
     try {
       await savePrompt(updated);
+      // 移除 toast 提示
     } catch (error) {
       showToast("更新失败", 'error');
     }
   };
+
+  const [deletingIds, setDeletingIds] = useState<Set<string>>(new Set());
 
   const handleDelete = async (promptId: string) => {
     const isInTrash = selectedCategory === 'trash';
@@ -531,35 +1019,54 @@ export function PromptList() {
         message: '确定要永久删除这个提示词吗？此操作无法撤销！',
         confirmText: '永久删除',
         cancelText: '取消',
-        type: 'danger'
+        type: 'danger',
+        originElementId: `prompt-card-${promptId}`, // 🔥 传递源元素 ID 用于 Mac 动画
       });
       
       if (confirmed) {
-        try {
-          await deletePrompt(promptId, true); // permanent = true
-          showToast("已永久删除", 'success');
-        } catch (error) {
-          showToast("删除失败", 'error');
-        }
+        setDeletingIds(prev => {
+          const next = new Set(prev);
+          next.add(promptId);
+          return next;
+        });
+        window.setTimeout(async () => {
+          try {
+            await deletePrompt(promptId, true);
+            showToast("已永久删除", 'success');
+          } catch (error) {
+            showToast("删除失败", 'error');
+          } finally {
+            setDeletingIds(prev => {
+              const next = new Set(prev);
+              next.delete(promptId);
+              return next;
+            });
+          }
+        }, 600);
       }
     } else {
-      // 不在回收站,移动到回收站
-      const confirmed = await confirm({
-        title: '删除提示词',
-        message: '确定要删除这个提示词吗？',
-        confirmText: '删除',
-        cancelText: '取消',
-        type: 'warning'
+      // 不在回收站,直接移动到回收站（带动画）
+      setDeletingIds(prev => {
+        const next = new Set(prev);
+        next.add(promptId);
+        return next;
       });
       
-      if (confirmed) {
+      // 延迟删除以显示动画
+      window.setTimeout(async () => {
         try {
           await deletePrompt(promptId, false);
-          showToast("已移动到回收站", 'success');
+          showToast("已移动到回收站，可从回收站恢复", 'success');
         } catch (error) {
           showToast("删除失败", 'error');
+        } finally {
+          setDeletingIds(prev => {
+            const next = new Set(prev);
+            next.delete(promptId);
+            return next;
+          });
         }
-      }
+      }, 600);
     }
   };
 
@@ -665,13 +1172,19 @@ export function PromptList() {
       {/* Top Navigation Bar */}
       <div 
         className="h-16 flex items-center justify-between px-6 border-b border-border flex-shrink-0 bg-background/50 backdrop-blur-md z-10 sticky top-0"
-        data-tauri-drag-region="true"
-        onMouseDown={handleDragStart}
+        data-tauri-drag-region={false}
+        onPointerDown={handleTitleBarPointerDown}
+        onPointerMove={handleTitleBarPointerMove}
+        onPointerUp={handleTitleBarPointerUp}
+        onPointerCancel={handleTitleBarPointerUp}
+        onDoubleClick={handleTitleBarDoubleClick}
       >
         {/* 左侧：侧边栏切换按钮 */}
         <div className="flex items-center">
           <button 
-            onClick={() => dispatch({ type: 'TOGGLE_SIDEBAR' })}
+            onClick={() => {
+              dispatch({ type: 'TOGGLE_SIDEBAR' });
+            }}
             data-tauri-drag-region={false}
             className="p-2 hover:bg-accent rounded-lg text-muted-foreground hover:text-foreground transition-colors"
           >
@@ -747,7 +1260,25 @@ export function PromptList() {
       </div>
 
       {/* Scrollable Content Area */}
-      <div className="flex-1 overflow-y-auto bg-background/30">
+      <div
+        className="flex-1 overflow-hidden"
+        onClick={(e: React.MouseEvent) => {
+          // 🔥 点击空白处取消选中
+          const target = e.target as HTMLElement;
+          // 如果点击的不是卡片或卡片内的元素，则取消选中
+          if (!target.closest('[data-card-wrapper]')) {
+            setFocusedIndex(-1);
+            setIsKeyboardNavigation(false);
+          }
+        }}
+      >
+      <ElasticScroll
+        className="h-full bg-background/30"
+        onContextMenu={(e) => {
+          e.preventDefault();
+          setContentContextMenu({ x: e.clientX, y: e.clientY });
+        }}
+      >
         <div className={`max-w-6xl mx-auto px-6 py-8 pb-20 relative no-scrollbar transition-opacity duration-150 ${isSwitchingList ? 'opacity-70' : 'opacity-100'}`}>
           <h1 className="text-2xl md:text-3xl font-bold text-foreground tracking-tight animate-fade-in mb-6">
             我的提示词库
@@ -759,7 +1290,7 @@ export function PromptList() {
               <span className="font-medium text-foreground">{prompts.length}</span> 个项目
             </div>
             <Button
-              onClick={openNewPrompt}
+              onClick={() => openNewPrompt()}
               className="btn-create px-3 py-2 rounded-lg text-sm font-medium flex items-center gap-1.5 transition-colors shadow-sm"
               id="new-prompt-button"
             >
@@ -769,23 +1300,42 @@ export function PromptList() {
 
           {/* Cards Grid */}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {prompts.map(prompt => {
+            {prompts.map((prompt, index) => {
               const isInTrash = selectedCategory === 'trash';
               const trashItemName = isInTrash ? getTrashItemName(prompt.path) : null;
               const visitCount = trashItemName ? (trashCounts[trashItemName] ?? 0) : 0;
+              const isDeleting = deletingIds.has(prompt.meta.id);
+              const isFocused = index === focusedIndex;
+              // 🔥 只在键盘导航时显示选中样式
+              const showFocusRing = isFocused && isKeyboardNavigation;
               
               return (
-              <SpotlightCard
+              <div
                 key={prompt.meta.id}
+                ref={(el) => (cardRefs.current[index] = el)}
+                tabIndex={-1}
+                data-card-wrapper="true"
+                onFocus={() => {
+                  // 🔥 鼠标点击不触发选中样式
+                  // 只有键盘导航才会设置 isKeyboardNavigation
+                }}
+                onClick={(e) => {
+                  // 🔥 鼠标点击时取消键盘导航模式
+                  e.stopPropagation();
+                  setIsKeyboardNavigation(false);
+                  setFocusedIndex(-1);
+                }}
+                className={`outline-none transition-all duration-200 ${showFocusRing ? 'ring-2 ring-primary rounded-xl shadow-lg' : ''}`}
+              >
+              <SpotlightCard
                 onClick={() => {
                   if (!isInTrash) {
                     handleCardClick(prompt.meta.id);
                   }
                 }}
-                className={`p-5 flex flex-col h-64 ${isInTrash ? 'cursor-default opacity-75' : 'cursor-pointer'}`}
+                className={`p-5 flex flex-col h-64 relative overflow-hidden ${isInTrash ? 'cursor-default opacity-75' : 'cursor-pointer'}`}
               >
-                {/* 为动画系统添加唯一ID */}
-                <div id={`prompt-card-${prompt.meta.id}`} className="w-full h-full flex flex-col">
+                <div id={`prompt-card-${prompt.meta.id}`} className="w-full h-full flex flex-col" style={isDeleting ? { opacity: 0 } : undefined}>
                 {/* Card Header */}
                 <div className="flex justify-between items-start mb-3">
                   <div className="flex-1 pr-4 min-w-0">
@@ -824,11 +1374,41 @@ export function PromptList() {
                   </div>
                   {!isInTrash && (
                     <button 
-                      onClick={(e) => { e.stopPropagation(); toggleFavorite(prompt.meta.id); }}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (!prompt.meta.is_favorite) {
+                          const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                          setBurstingId(prompt.meta.id);
+                          setBurstAnchor({
+                            id: prompt.meta.id,
+                            x: rect.left + rect.width / 2,
+                            y: rect.top + rect.height / 2,
+                          });
+                          if (burstTimerRef.current) {
+                            window.clearTimeout(burstTimerRef.current);
+                          }
+                          burstTimerRef.current = window.setTimeout(() => {
+                            setBurstingId((cur) => (cur === prompt.meta.id ? null : cur));
+                            setBurstAnchor((cur) => (cur?.id === prompt.meta.id ? null : cur));
+                            burstTimerRef.current = null;
+                          }, 600);
+                        }
+                        toggleFavorite(prompt.meta.id);
+                      }}
                       className={`p-1.5 rounded-lg hover:bg-accent transition-colors ${prompt.meta.is_favorite ? 'text-yellow-400' : 'text-muted-foreground hover:text-foreground'}`}
                     >
-                      <Star size={16} fill={prompt.meta.is_favorite ? "currentColor" : "none"} />
+                      <Star
+                        size={16}
+                        fill={prompt.meta.is_favorite ? "currentColor" : "none"}
+                        className={burstingId === prompt.meta.id ? 'star-bounce' : undefined}
+                      />
                     </button>
+                  )}
+                  {isDeleting && (
+                    <DisintegrateOverlay
+                      onComplete={() => {
+                      }}
+                    />
                   )}
                 </div>
 
@@ -878,24 +1458,32 @@ export function PromptList() {
                   </div>
                 </div>
                 </div>
+                {isDeleting && (
+                  <DisintegrateOverlay
+                    onComplete={() => {
+                    }}
+                  />
+                )}
               </SpotlightCard>
+              </div>
             )})}
           </div>
 
           {/* Empty State */}
           {prompts.length === 0 && (
-            <div className="flex flex-col items-center justify-center py-24 text-muted-foreground select-none">
-              <div className="text-5xl mb-4 grayscale opacity-50">🥥</div>
-              <p className="text-sm">没有找到相关内容</p>
-              <button 
-                onClick={() => { dispatch({ type: 'SELECT_CATEGORY', payload: null }); dispatch({ type: 'SET_SEARCH', payload: '' }); }}
-                className="text-primary text-sm mt-3 hover:underline"
-              >
-                显示全部
-              </button>
-            </div>
+            <EmptyState
+              title="这里还是空的"
+              description={
+                searchQuery || selectedCategory
+                  ? '没有找到相关内容，试试清空筛选或新建一个提示词。'
+                  : '创建你的第一条提示词，让灵感开始沉淀。'
+              }
+              primaryActionLabel="新建提示词"
+              onPrimaryAction={() => openNewPrompt(selectedCategory && selectedCategory !== 'favorites' && selectedCategory !== 'trash' ? selectedCategory : null)}
+            />
           )}
         </div>
+      </ElasticScroll>
       </div>
 
       {/* Add New Prompt Modal */}
@@ -1199,6 +1787,67 @@ export function PromptList() {
             </div>
           </div>
         </NewPromptOverlay>
+      )}
+
+      {contentContextMenu &&
+        createPortal(
+          <>
+            <div
+              className="fixed z-[200000] bg-popover/95 backdrop-blur-xl border border-border rounded-lg shadow-2xl py-1 min-w-[160px]"
+              style={{ left: contentContextMenu!.x, top: contentContextMenu!.y }}
+            >
+              <button
+                onClick={() => {
+                  const preselect =
+                    selectedCategory && selectedCategory !== 'favorites' && selectedCategory !== 'trash'
+                      ? selectedCategory
+                      : undefined;
+                  setContentContextMenu(null);
+                  openNewPrompt(preselect);
+                }}
+                className="w-full px-3 py-2 text-sm text-foreground hover:bg-accent flex items-center gap-2 transition-colors"
+              >
+                <Plus size={14} />
+                新建提示词
+              </button>
+            </div>
+            <div
+              className="fixed inset-0 z-40"
+              onClick={() => setContentContextMenu(null)}
+              onContextMenu={(e) => {
+                e.preventDefault();
+                setContentContextMenu(null);
+              }}
+            />
+          </>,
+          document.body
+        )}
+
+      {burstAnchor && typeof document !== 'undefined' && createPortal(
+        <div
+          style={{
+            position: 'fixed',
+            left: burstAnchor.x,
+            top: burstAnchor.y,
+            width: 0,
+            height: 0,
+            pointerEvents: 'none',
+            zIndex: 1000001,
+          }}
+        >
+          {fireworkParticles.map((p, idx) => (
+            <span
+              key={idx}
+              className="firework-particle"
+              style={{
+                ['--tx' as any]: p.tx,
+                ['--ty' as any]: p.ty,
+                backgroundColor: p.color,
+              }}
+            />
+          ))}
+        </div>,
+        document.body
       )}
     </div>
   );

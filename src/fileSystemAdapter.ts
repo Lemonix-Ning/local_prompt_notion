@@ -169,18 +169,44 @@ export class FileSystemAdapter implements IFileSystemAdapter {
   async savePrompt(promptData: PromptData): Promise<void> {
     const { meta, content, path: promptPath } = promptData;
 
+    const metaPath = path.join(promptPath, 'meta.json');
+    const contentPath = path.join(promptPath, 'prompt.md');
+    let touchUpdatedAt = true;
+    try {
+      const prevMetaRaw = await fs.readFile(metaPath, 'utf-8');
+      const prevMeta = JSON.parse(prevMetaRaw);
+      let prevContent = '';
+      try {
+        prevContent = await fs.readFile(contentPath, 'utf-8');
+      } catch {
+      }
+
+      const changedFavorite = !!prevMeta.is_favorite !== !!meta.is_favorite;
+      const changedTitle = (prevMeta.title || '') !== (meta.title || '');
+      const changedAuthor = (prevMeta.author || '') !== (meta.author || '');
+      const changedTags = JSON.stringify(prevMeta.tags || []) !== JSON.stringify(meta.tags || []);
+      const changedModel = JSON.stringify(prevMeta.model_config || {}) !== JSON.stringify(meta.model_config || {});
+      const changedContent = (prevContent || '') !== (content || '');
+
+      const onlyFavoriteChanged = changedFavorite && !changedTitle && !changedAuthor && !changedTags && !changedModel && !changedContent;
+      if (onlyFavoriteChanged) {
+        touchUpdatedAt = false;
+      }
+    } catch {
+    }
+
     // 确保目录存在
     await fs.mkdir(promptPath, { recursive: true });
 
     // 更新时间戳
-    meta.updated_at = new Date().toISOString();
+    if (touchUpdatedAt) {
+      meta.updated_at = new Date().toISOString();
+    }
 
     // 写入元数据
-    const metaPath = path.join(promptPath, 'meta.json');
     await fs.writeFile(metaPath, JSON.stringify(meta, null, 2), 'utf-8');
 
     // 写入内容
-    const contentPath = path.join(promptPath, 'prompt.md');
     await fs.writeFile(contentPath, content, 'utf-8');
   }
 

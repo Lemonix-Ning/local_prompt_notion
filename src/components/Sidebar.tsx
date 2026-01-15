@@ -3,13 +3,14 @@
  * 显示分类树形结构
  */
 
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
-import { ChevronRight, ChevronDown, Plus, Star, Book, Trash2, Folder, FolderOpen, Edit2, Settings, Sun, Moon, Check, X, FileText } from 'lucide-react';
+import { ChevronRight, Plus, Star, Book, Trash2, Folder, FolderOpen, Edit2, Settings, Sun, Moon, Check, X, FileText } from 'lucide-react';
 import { CategoryNode } from '../types';
 import { useApp } from '../AppContext';
 import { useTheme } from '../contexts/ThemeContext';
 import { useToast } from '../contexts/ToastContext';
+import { ElasticScroll } from './ElasticScroll';
 import { analyzeCategoryContent, CategoryContentInfo } from '../utils/categoryContentAnalyzer';
 import { DeleteCategoryDialog, DeleteOptions } from './DeleteCategoryDialog';
 
@@ -103,7 +104,7 @@ function ConfirmDialog({
   };
 
   return (
-    <div className="fixed inset-0 bg-black/40 dark:bg-black/60 backdrop-blur-sm z-[200] flex items-center justify-center p-4">
+    <div className="fixed inset-0 bg-black/40 dark:bg-black/60 backdrop-blur-sm z-[100000] flex items-center justify-center p-4">
       <div className="bg-popover/95 backdrop-blur-xl border border-border rounded-xl shadow-2xl w-full max-w-md">
         <div className="p-6">
           <h3 className="text-lg font-semibold text-foreground mb-2">{title}</h3>
@@ -144,7 +145,7 @@ function SettingsPanel({ isOpen, onClose }: SettingsPanelProps) {
   };
 
   return (
-    <div className="fixed inset-0 bg-black/40 dark:bg-black/60 backdrop-blur-sm z-[200] flex items-center justify-center p-4">
+    <div className="fixed inset-0 bg-black/40 dark:bg-black/60 backdrop-blur-sm z-[100000] flex items-center justify-center p-4">
       <div className="bg-popover/95 backdrop-blur-xl border border-border rounded-xl shadow-2xl w-full max-w-md">
         <div className="flex items-center justify-between p-6 border-b border-border">
           <h3 className="text-lg font-semibold text-foreground">设置</h3>
@@ -237,7 +238,7 @@ function ContextMenu({ x, y, onClose, onRename, onDelete, onNewSubCategory, onNe
   return createPortal(
     <div
       ref={menuRef}
-      className="fixed z-[9999] bg-popover/95 backdrop-blur-xl border border-border rounded-lg shadow-2xl py-1 min-w-[160px]"
+      className="fixed z-[200000] bg-popover/95 backdrop-blur-xl border border-border rounded-lg shadow-2xl py-1 min-w-[160px]"
       style={{ left: x, top: y }}
     >
       <button
@@ -309,6 +310,117 @@ export function Sidebar() {
   const [rootContextMenu, setRootContextMenu] = useState<{ x: number; y: number } | null>(null);
   const newCategoryInputRef = useRef<HTMLInputElement>(null);
 
+  // Resizable Sidebar State
+  const [sidebarWidth, setSidebarWidth] = useState(256);
+  const [isResizing, setIsResizing] = useState(false);
+
+  const startResizing = useCallback(() => setIsResizing(true), []);
+  const stopResizing = useCallback(() => setIsResizing(false), []);
+
+  const resize = useCallback((e: MouseEvent) => {
+    if (isResizing) {
+      const newWidth = Math.max(160, Math.min(600, e.clientX));
+      setSidebarWidth(newWidth);
+    }
+  }, [isResizing]);
+
+  useEffect(() => {
+    window.addEventListener("mousemove", resize);
+    window.addEventListener("mouseup", stopResizing);
+    return () => {
+      window.removeEventListener("mousemove", resize);
+      window.removeEventListener("mouseup", stopResizing);
+    };
+  }, [resize, stopResizing]);
+
+  const [pinnedOpenPaths, setPinnedOpenPaths] = useState<Set<string>>(new Set());
+  const [userCollapsedPaths, setUserCollapsedPaths] = useState<Set<string>>(new Set());
+  const parentPathMapRef = useRef<Map<string, string | null>>(new Map());
+
+  const normalizeForCompare = (p: string) => p.replace(/\\/g, '/').replace(/\/+$/, '');
+
+  const buildParentPathMap = (nodes: CategoryNode[], parentPath: string | null) => {
+    for (const node of nodes) {
+      parentPathMapRef.current.set(normalizeForCompare(node.path), parentPath ? normalizeForCompare(parentPath) : null);
+      if (node.children.length > 0) {
+        buildParentPathMap(node.children, node.path);
+      }
+    }
+  };
+
+  const getAncestorPaths = (path: string): string[] => {
+    const out: string[] = [];
+    let current: string | null = normalizeForCompare(path);
+    while (current) {
+      out.unshift(current);
+      const parentPath: string | null = parentPathMapRef.current.get(current) ?? null;
+      current = parentPath;
+    }
+    return out;
+  };
+
+  const handlePinChain = (path: string) => {
+    const chain = getAncestorPaths(path);
+    setUserCollapsedPaths((prev) => {
+      const copy = new Set(prev);
+      for (const p of chain) {
+        copy.delete(normalizeForCompare(p));
+      }
+      return copy;
+    });
+    setPinnedOpenPaths(new Set(chain));
+  };
+
+  const handleTogglePinnedExpand = (path: string) => {
+    const key = normalizeForCompare(path);
+    const isCurrentlyExpanded = isPathExpanded(path);
+    if (isCurrentlyExpanded) {
+      // 强制折叠
+      setUserCollapsedPaths((prev) => {
+        const copy = new Set(prev);
+        copy.add(key);
+        return copy;
+      });
+      setPinnedOpenPaths((prev) => {
+        const copy = new Set(prev);
+        copy.delete(key);
+        return copy;
+      });
+      return;
+    }
+
+    // 强制展开：移除手动折叠标记，并固定展开
+    setUserCollapsedPaths((prev) => {
+      const copy = new Set(prev);
+      copy.delete(key);
+      return copy;
+    });
+    setPinnedOpenPaths((prev) => {
+      const copy = new Set(prev);
+      copy.add(key);
+      return copy;
+    });
+  };
+
+  const isPathExpanded = (path: string) => {
+    const key = normalizeForCompare(path);
+    if (userCollapsedPaths.has(key)) return false;
+    return pinnedOpenPaths.has(key);
+  };
+
+  useEffect(() => {
+    parentPathMapRef.current.clear();
+    if (fileSystem?.categories) {
+      buildParentPathMap(fileSystem.categories, null);
+    }
+  }, [fileSystem?.categories]);
+
+  useEffect(() => {
+    if (selectedCategory && selectedCategory !== 'favorites' && selectedCategory !== 'trash') {
+      handlePinChain(selectedCategory);
+    }
+  }, [selectedCategory]);
+
   // 全局拖拽结束监听器，确保所有拖拽状态都被清除
   useEffect(() => {
     const handleDragEnd = () => {
@@ -372,6 +484,11 @@ export function Sidebar() {
 
     try {
       await createCategory(parentPath, newCategoryName.trim());
+
+      if (newCategoryParent) {
+        handlePinChain(newCategoryParent);
+      }
+
       setIsCreatingCategory(false);
       setNewCategoryName('');
       setNewCategoryParent(null);
@@ -518,7 +635,6 @@ export function Sidebar() {
   };
 
   const isSidebarOpen = uiState.sidebarOpen;
-  const sidebarWidthPx = 256;
 
   const allPrompts = Array.from(fileSystem?.allPrompts.values() || []);
   const isInTrash = (path: string) => path.includes('/trash/') || path.includes('\\trash\\');
@@ -529,18 +645,19 @@ export function Sidebar() {
   return (
     <>
       <div
-        className="notion-sidebar backdrop-blur-xl flex flex-col"
+        className="notion-sidebar backdrop-blur-xl flex flex-col relative"
         data-tauri-drag-region={false}
         style={{
-          width: isSidebarOpen ? `${sidebarWidthPx}px` : '0px',
+          width: isSidebarOpen ? `${sidebarWidth}px` : '0px',
           transform: isSidebarOpen ? 'translateX(0)' : 'translateX(-24px)',
           opacity: isSidebarOpen ? 1 : 0,
-          overflow: 'hidden',
+          overflow: isResizing ? 'hidden' : 'hidden', // Keep hidden to avoid scrollbars during resize if content overflows
           flexShrink: 0,
           pointerEvents: isSidebarOpen ? 'auto' : 'none',
           borderRight: isSidebarOpen ? '1px solid var(--border)' : '1px solid transparent',
-          transition:
-            'width 0.26s cubic-bezier(0.2, 0.8, 0.2, 1), transform 0.26s cubic-bezier(0.2, 0.8, 0.2, 1), opacity 0.18s ease',
+          transition: isResizing 
+            ? 'opacity 0.18s ease' // Disable width/transform transition during resize
+            : 'width 0.26s cubic-bezier(0.2, 0.8, 0.2, 1), transform 0.26s cubic-bezier(0.2, 0.8, 0.2, 1), opacity 0.18s ease',
         }}
       >
         {/* Workspace Header */}
@@ -551,8 +668,8 @@ export function Sidebar() {
         </div>
 
         {/* Navigation */}
-        <div 
-          className="flex-1 overflow-y-auto px-2 space-y-0.5 flex flex-col min-h-0"
+        <ElasticScroll
+          className="flex-1 px-2 space-y-0.5 flex flex-col min-h-0"
           onContextMenu={handleLibraryContextMenu}
         >
           <SidebarItem 
@@ -624,7 +741,10 @@ export function Sidebar() {
                   key={category.path}
                   category={category}
                   selectedPath={selectedCategory}
-                  onSelect={(path) => dispatch({ type: 'SELECT_CATEGORY', payload: path })}
+                  onSelect={(path) => {
+                    handlePinChain(path);
+                    dispatch({ type: 'SELECT_CATEGORY', payload: path });
+                  }}
                   onRename={renameCategory}
                   onDelete={handleDeleteWithConfirm}
                   onCreateSubCategory={handleStartCreateCategory}
@@ -640,6 +760,9 @@ export function Sidebar() {
                   onNewCategoryKeyDown={handleNewCategoryKeyDown}
                   newCategoryInputRef={newCategoryInputRef}
                   showToast={showToast}
+                  isExpanded={isPathExpanded(category.path)}
+                  isPathExpanded={isPathExpanded}
+                  onTogglePinnedExpand={handleTogglePinnedExpand}
                 />
               ))
             }
@@ -662,7 +785,7 @@ export function Sidebar() {
               </div>
             )}
           </div>
-        </div>
+        </ElasticScroll>
         
         <div className="p-2 border-t border-border space-y-2">
           {/* 快速主题切换按钮 */}
@@ -676,12 +799,19 @@ export function Sidebar() {
             设置
           </button>
         </div>
+
+        {/* Resize Handle */}
+        <div 
+          className={`resize-handle ${isResizing ? 'resizing' : ''}`} 
+          onMouseDown={startResizing} 
+          onDoubleClick={() => setSidebarWidth(256)} 
+        />
       </div>
 
       {/* 根目录右键菜单 */}
       {rootContextMenu && createPortal(
         <div
-          className="fixed z-[9999] bg-popover/95 backdrop-blur-xl border border-border rounded-lg shadow-2xl py-1 min-w-[160px]"
+          className="fixed z-[200000] bg-popover/95 backdrop-blur-xl border border-border rounded-lg shadow-2xl py-1 min-w-[160px]"
           style={{ left: rootContextMenu.x, top: rootContextMenu.y }}
         >
           <button
@@ -755,6 +885,9 @@ interface CategoryItemProps {
   onNewCategoryKeyDown?: (e: React.KeyboardEvent) => void;
   newCategoryInputRef?: React.RefObject<HTMLInputElement>;
   showToast?: (message: string, type?: 'success' | 'error' | 'warning' | 'info') => void;
+  isExpanded: boolean;
+  isPathExpanded: (path: string) => boolean;
+  onTogglePinnedExpand: (path: string) => void;
 }
 
 function CategoryItem({ 
@@ -776,9 +909,11 @@ function CategoryItem({
   onCancelCreateCategory,
   onNewCategoryKeyDown,
   newCategoryInputRef,
-  showToast
+  showToast,
+  isExpanded,
+  isPathExpanded,
+  onTogglePinnedExpand
 }: CategoryItemProps) {
-  const [isExpanded, setIsExpanded] = useState(true); // 默认展开
   const [isRenaming, setIsRenaming] = useState(false);
   const [renamingValue, setRenamingValue] = useState(category.name);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
@@ -824,7 +959,7 @@ function CategoryItem({
   const handleToggleExpand = (e: React.MouseEvent) => {
     e.stopPropagation();
     if (hasChildren) {
-      setIsExpanded(!isExpanded);
+      onTogglePinnedExpand(category.path);
     }
   };
 
@@ -833,6 +968,14 @@ function CategoryItem({
     if (isRenaming) return;
     e.stopPropagation();
     onSelect(category.path);
+  };
+
+  const handleMouseEnter = (e: React.MouseEvent) => {
+    e.stopPropagation();
+  };
+
+  const handleMouseLeave = (e: React.MouseEvent) => {
+    e.stopPropagation();
   };
 
   // 双击重命名
@@ -1003,7 +1146,7 @@ function CategoryItem({
   const shouldShowNewCategoryInput = isCreatingCategory && newCategoryParent === category.path;
 
   return (
-    <div>
+    <div onMouseEnter={handleMouseEnter} onMouseLeave={handleMouseLeave}>
       <div
         id={`category-row-${category.path.replace(/[^a-zA-Z0-9_-]/g, '_')}`}
         onClick={handleSelectCategory}
@@ -1014,24 +1157,24 @@ function CategoryItem({
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}
-        className={`group flex items-center justify-between px-2 py-1.5 text-sm rounded-md cursor-pointer notion-sidebar-item ${
+        className={`group relative flex items-center justify-between px-2 py-1.5 text-sm rounded-md cursor-pointer notion-sidebar-item transition-colors duration-200 ${
           isSelected ? 'active' : ''
         } ${isRenaming ? 'bg-accent' : ''} ${isDragOver ? 'ring-2 ring-primary/30 bg-accent' : ''}`}
         style={{ paddingLeft: `${8 + level * 16}px` }}
         data-tauri-drag-region={false}
       >
-        <div className="flex items-center gap-2 flex-1 min-w-0">
+        <div className="absolute left-0 top-1 bottom-1 w-[2px] rounded-full bg-primary transition-opacity duration-200" style={{ opacity: isSelected ? 1 : 0 }} />
+        <div className="flex items-center gap-2 flex-1 min-w-0 transition-transform duration-150 group-hover:translate-x-0.5">
           {/* 展开/折叠箭头 */}
           <div 
             onClick={handleToggleExpand}
             className="flex items-center justify-center w-4 h-4 hover:bg-accent rounded transition-colors"
           >
             {hasChildren ? (
-              isExpanded ? (
-                <ChevronDown size={12} className="notion-sidebar-text-muted" />
-              ) : (
-                <ChevronRight size={12} className="notion-sidebar-text-muted" />
-              )
+              <ChevronRight
+                size={12}
+                className={`notion-sidebar-text-muted transition-transform duration-200 ${isExpanded ? 'rotate-90' : 'rotate-0'}`}
+              />
             ) : (
               <div className="w-3" /> // 占位符，保持对齐
             )}
@@ -1100,8 +1243,17 @@ function CategoryItem({
       )}
 
       {/* 子分类 */}
-      {isExpanded && hasChildren && (
-        <div className="ml-2">
+      {hasChildren && (
+        <div
+          className="ml-2"
+          style={{
+            maxHeight: isExpanded ? '1600px' : '0px',
+            opacity: isExpanded ? 1 : 0,
+            overflow: 'hidden',
+            transition: 'max-height 0.28s cubic-bezier(0.19, 1, 0.22, 1), opacity 0.2s ease',
+            pointerEvents: isExpanded ? 'auto' : 'none',
+          }}
+        >
           {category.children.map(child => (
             <CategoryItem
               key={child.path}
@@ -1112,6 +1264,8 @@ function CategoryItem({
               onDelete={onDelete}
               onCreateSubCategory={onCreateSubCategory}
               onNewPrompt={onNewPrompt}
+              onMove={onMove}
+              rootPath={rootPath}
               level={level + 1}
               isCreatingCategory={isCreatingCategory}
               newCategoryParent={newCategoryParent}
@@ -1122,6 +1276,9 @@ function CategoryItem({
               onNewCategoryKeyDown={onNewCategoryKeyDown}
               newCategoryInputRef={newCategoryInputRef}
               showToast={showToast}
+              isExpanded={isPathExpanded(child.path)}
+              isPathExpanded={isPathExpanded}
+              onTogglePinnedExpand={onTogglePinnedExpand}
             />
           ))}
         </div>

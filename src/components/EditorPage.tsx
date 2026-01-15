@@ -28,7 +28,7 @@ interface EditorPageProps {
 export function EditorPage({ promptId, onClose }: EditorPageProps) {
   const { state, savePrompt, deletePrompt } = useApp();
   const { showToast } = useToast();
-  const { confirm } = useConfirm();
+  useConfirm(); // 保留 hook 调用以维持 Context 订阅
   const { theme } = useTheme();
   const [formData, setFormData] = useState<PromptData | null>(null);
   const [hasChanges, setHasChanges] = useState(false);
@@ -148,20 +148,12 @@ export function EditorPage({ promptId, onClose }: EditorPageProps) {
   const handleDelete = async () => {
     if (!formData) return;
     
-    const confirmed = await confirm({
-      title: '确认删除',
-      message: `确定要删除提示词 "${formData.meta.title}" 吗？`,
-      type: 'danger'
-    });
-    
-    if (confirmed) {
-      try {
-        await deletePrompt(promptId);
-        onClose();
-        showToast('已删除提示词', 'success');
-      } catch (error) {
-        showToast('删除失败: ' + (error as Error).message, 'error');
-      }
+    try {
+      await deletePrompt(promptId);
+      onClose();
+      showToast('已移动到回收站，可从回收站恢复', 'success');
+    } catch (error) {
+      showToast('删除失败: ' + (error as Error).message, 'error');
     }
   };
 
