@@ -3,7 +3,7 @@
  * 实现 Mac 风格共享元素过渡动画 + 沉浸式编辑器UI
  */
 
-import { useState, useEffect, useRef, useMemo } from 'react';
+import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { useTheme } from '../contexts/ThemeContext';
 import { useApp } from '../AppContext';
@@ -25,6 +25,8 @@ import { getSmartIcon } from '../utils/smartIcon';
 import { getIconGradientConfig, getTagStyle } from '../utils/tagColors';
 import { useToast } from '../contexts/ToastContext';
 import { useConfirm } from '../contexts/ConfirmContext';
+import { ContentSearchBar, type SearchMatch } from './ContentSearchBar';
+import { MarkdownRenderer } from './MarkdownRenderer';
 
 interface EditorOverlayProps {
   promptId: string;
@@ -432,6 +434,12 @@ export function EditorOverlay({ promptId, originCardId, onClose }: EditorOverlay
   const [isExpanded, setIsExpanded] = useState(false);
   const [isFocusMode, setIsFocusMode] = useState(false);
   const [isClosing, setIsClosing] = useState(false);
+  
+  // 🔥 搜索功能状态
+  const [isSearchVisible, setIsSearchVisible] = useState(false);
+  const [isEditing, setIsEditing] = useState(false); // 🔥 编辑模式：默认显示渲染后的 Markdown
+  const contentTextareaRef = useRef<HTMLTextAreaElement>(null);
+  const markdownContainerRef = useRef<HTMLDivElement>(null);
 
   const scrollableRef = useRef<HTMLDivElement>(null);
   const scrollTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -706,16 +714,33 @@ export function EditorOverlay({ promptId, originCardId, onClose }: EditorOverlay
     };
   }, []);
 
-  // 处理 ESC 键关闭
+  // 处理 ESC 键关闭 和 Ctrl+F 搜索
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      // Ctrl+F 打开搜索
+      if ((e.ctrlKey || e.metaKey) && e.key === 'f') {
+        e.preventDefault();
+        setIsSearchVisible(true);
+        return;
+      }
+      
+      // ESC 关闭搜索或编辑器
       if (e.key === 'Escape') {
-        handleClose();
+        if (isSearchVisible) {
+          setIsSearchVisible(false);
+        } else {
+          handleClose();
+        }
       }
     };
 
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [isSearchVisible]);
+
+  // 搜索高亮回调
+  const handleSearchHighlight = useCallback((_matches: SearchMatch[], _currentIndex: number) => {
+    // 预留：将来可以用于高亮显示匹配文本
   }, []);
 
   // 初始化动画状态
@@ -1539,29 +1564,92 @@ export function EditorOverlay({ promptId, originCardId, onClose }: EditorOverlay
               }} />
 
               {/* 正文编辑区 */}
-              <div style={{ maxWidth: '1200px', flex: 1, display: 'flex', flexDirection: 'column', width: '100%' }}>
-                <textarea 
-                  style={{
-                    width: '100%',
-                    flex: 1,
-                    minHeight: 0,
-                    fontSize: '16px',
-                    lineHeight: 1.6,
-                    background: 'transparent',
-                    border: 'none',
-                    outline: 'none',
-                    resize: 'none',
-                    fontFamily: 'inherit',
-                    color: theme === 'dark' ? '#ffffff' : '#000000'
+              <div style={{ maxWidth: '1200px', flex: 1, display: 'flex', flexDirection: 'column', width: '100%', position: 'relative' }}>
+                {/* 🔥 搜索栏 */}
+                <ContentSearchBar
+                  content={content}
+                  isVisible={isSearchVisible}
+                  onClose={() => {
+                    setIsSearchVisible(false);
                   }}
-                  value={content}
-                  onChange={(e) => setContent(e.target.value)}
-                  placeholder="开始写作..."
-                  onDoubleClick={(e) => {
-                    e.stopPropagation();
-                    toggleFocusMode();
-                  }}
+                  onHighlight={handleSearchHighlight}
+                  theme={theme}
+                  textareaRef={contentTextareaRef}
                 />
+                
+                {/* 🔥 OpenAI 风格：点击进入编辑，失焦显示渲染 */}
+                {isEditing ? (
+                  <textarea 
+                    ref={contentTextareaRef}
+                    style={{
+                      width: '100%',
+                      flex: 1,
+                      minHeight: 0,
+                      fontSize: '16px',
+                      lineHeight: 1.7,
+                      background: 'transparent',
+                      border: 'none',
+                      outline: 'none',
+                      resize: 'none',
+                      fontFamily: 'ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace',
+                      color: theme === 'dark' ? '#e4e4e7' : '#18181b',
+                      padding: '0',
+                    }}
+                    value={content}
+                    onChange={(e) => setContent(e.target.value)}
+                    onBlur={() => setIsEditing(false)}
+                    onKeyDown={(e) => {
+                      // Tab 键插入制表符
+                      if (e.key === 'Tab') {
+                        e.preventDefault();
+                        const textarea = e.currentTarget;
+                        const start = textarea.selectionStart;
+                        const end = textarea.selectionEnd;
+                        const newContent = content.substring(0, start) + '  ' + content.substring(end);
+                        setContent(newContent);
+                        requestAnimationFrame(() => {
+                          textarea.selectionStart = textarea.selectionEnd = start + 2;
+                        });
+                      }
+                      // ESC 退出编辑
+                      if (e.key === 'Escape') {
+                        e.preventDefault();
+                        setIsEditing(false);
+                      }
+                    }}
+                    placeholder="开始写作... (支持 Markdown)"
+                    autoFocus
+                  />
+                ) : (
+                  <div
+                    ref={markdownContainerRef}
+                    onClick={() => setIsEditing(true)}
+                    onDoubleClick={(e) => {
+                      e.stopPropagation();
+                      toggleFocusMode();
+                    }}
+                    style={{
+                      flex: 1,
+                      minHeight: 0,
+                      overflowY: 'auto',
+                      cursor: 'text',
+                    }}
+                  >
+                    {content.trim() ? (
+                      <MarkdownRenderer content={content} theme={theme} />
+                    ) : (
+                      <div 
+                        style={{ 
+                          color: theme === 'dark' ? 'rgba(255,255,255,0.4)' : 'rgba(0,0,0,0.4)',
+                          fontSize: '16px',
+                          lineHeight: 1.7,
+                        }}
+                      >
+                        点击此处开始写作... (支持 Markdown)
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
           </div>
