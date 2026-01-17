@@ -1,29 +1,48 @@
 /**
  * API 客户端
  * 与后端服务通信
+ * 
+ * 端口隔离策略（完全基于运行环境检测，不依赖环境变量）：
+ * - 网页端：只使用 3001 端口
+ * - 桌面端（Tauri）：只使用 3002 端口
  */
 
-const DEFAULT_API_BASE = 'http://localhost:3001/api';
+const WEB_API_BASE = 'http://localhost:3001/api';
 const DESKTOP_API_BASE = 'http://localhost:3002/api';
-const ENV_API_BASE = import.meta.env.VITE_API_BASE as string | undefined;
 
 // 🔥 检测是否在 Tauri 桌面环境中
-const isTauri =
-  typeof window !== 'undefined' &&
-  typeof (window as any).__TAURI__ !== 'undefined' &&
-  (window as any).__TAURI__;
+const isTauri = (() => {
+  if (typeof window === 'undefined') return false;
+  
+  // Tauri 2.x 检测方式
+  if ((window as any).__TAURI_INTERNALS__) {
+    console.log('[API Client] Detected Tauri 2.x via __TAURI_INTERNALS__');
+    return true;
+  }
+  
+  // Tauri 1.x 兼容检测
+  if ((window as any).__TAURI__) {
+    console.log('[API Client] Detected Tauri 1.x via __TAURI__');
+    return true;
+  }
+  
+  // 额外检测：检查 Tauri 的 IPC 协议
+  if (window.location.protocol === 'tauri:' || (window.location.protocol === 'https:' && window.location.hostname === 'tauri.localhost')) {
+    console.log('[API Client] Detected Tauri via protocol');
+    return true;
+  }
+  
+  return false;
+})();
 
-// 🔥 桌面端始终使用 3002 端口，网页端使用环境变量或默认 3001 端口
-let runtimeApiBase: string;
-if (isTauri) {
-  // 桌面端：强制使用 3002 端口，不进行任何回退
-  runtimeApiBase = DESKTOP_API_BASE;
-  console.log('[API Client] Running in Tauri desktop mode, using port 3002');
-} else {
-  // 网页端：使用环境变量或默认值
-  runtimeApiBase = ENV_API_BASE || DEFAULT_API_BASE;
-  console.log('[API Client] Running in web mode, using:', runtimeApiBase);
-}
+// 🔥 严格的端口隔离：完全基于 Tauri 检测，忽略环境变量
+// 桌面端 = 3002，网页端 = 3001，互不干扰
+const API_BASE: string = isTauri ? DESKTOP_API_BASE : WEB_API_BASE;
+
+console.log(`[API Client] ========================================`);
+console.log(`[API Client] Mode: ${isTauri ? 'DESKTOP (Tauri)' : 'WEB (Browser)'}`);
+console.log(`[API Client] API Base: ${API_BASE}`);
+console.log(`[API Client] ========================================`);
 
 interface ApiResponse<T = any> {
   success: boolean;
@@ -34,13 +53,14 @@ interface ApiResponse<T = any> {
 
 /**
  * 通用请求函数
+ * 🔥 不进行任何端口回退，确保数据隔离
  */
 async function request<T = any>(
   endpoint: string,
   options?: RequestInit
 ): Promise<ApiResponse<T>> {
-  const fetchOnce = async (base: string): Promise<ApiResponse<T>> => {
-    const response = await fetch(`${base}${endpoint}`, {
+  try {
+    const response = await fetch(`${API_BASE}${endpoint}`, {
       headers: {
         'Content-Type': 'application/json',
         ...options?.headers,
@@ -55,28 +75,8 @@ async function request<T = any>(
     }
 
     return data;
-  };
-
-  try {
-    return await fetchOnce(runtimeApiBase);
   } catch (error) {
-    // 🔥 只有在网页端才进行端口回退，桌面端不回退
-    if (!isTauri && runtimeApiBase !== DEFAULT_API_BASE) {
-      try {
-        console.warn(`[API Client] Request failed for ${runtimeApiBase}, retrying with ${DEFAULT_API_BASE}`, error);
-        const out = await fetchOnce(DEFAULT_API_BASE);
-        runtimeApiBase = DEFAULT_API_BASE;
-        return out;
-      } catch (retryError) {
-        console.error('[API Client] Retry also failed:', retryError);
-        return {
-          success: false,
-          error: retryError instanceof Error ? retryError.message : 'Unknown error',
-        };
-      }
-    }
-
-    console.error('[API Client] Request error:', error);
+    console.error(`[API Client] Request error (${API_BASE}${endpoint}):`, error);
     return {
       success: false,
       error: error instanceof Error ? error.message : 'Unknown error',
@@ -144,6 +144,8 @@ export const api = {
       tags?: string[];
       model_config?: any;
       author?: string;
+      type?: 'NOTE' | 'TASK';
+      scheduled_time?: string;
     }) =>
       request('/prompts', {
         method: 'POST',
@@ -156,9 +158,19 @@ export const api = {
       tags?: string[];
       model_config?: any;
       is_favorite?: boolean;
+      is_pinned?: boolean;
       author?: string;
       category?: string;
+      type?: 'NOTE' | 'TASK';
+      scheduled_time?: string | null; // null 表示清除
       categoryPath?: string;
+      recurrence?: {
+        type: 'daily' | 'weekly' | 'monthly';
+        weekDays?: number[];
+        monthDays?: number[];
+        time: string;
+        enabled: boolean;
+      } | null; // null 表示清除
     }) =>
       request(`/prompts/${id}`, {
         method: 'PUT',
@@ -168,6 +180,12 @@ export const api = {
     delete: (id: string, permanent = false) =>
       request(`/prompts/${id}${permanent ? '?permanent=true' : ''}`, {
         method: 'DELETE',
+      }),
+
+    batchDelete: (ids: string[], permanent = false) =>
+      request('/prompts/batch-delete', {
+        method: 'POST',
+        body: JSON.stringify({ ids, permanent }),
       }),
 
     restore: (id: string) =>
@@ -180,7 +198,7 @@ export const api = {
       formData.append('image', file);
 
       try {
-        const response = await fetch(`${runtimeApiBase}/prompts/${promptId}/images`, {
+        const response = await fetch(`${API_BASE}/prompts/${promptId}/images`, {
           method: 'POST',
           body: formData,
         });
@@ -194,6 +212,40 @@ export const api = {
         };
       }
     },
+
+    import: (data: {
+      prompts: Array<{
+        title: string;
+        content?: string;
+        tags?: string[];
+        model_config?: any;
+        is_favorite?: boolean;
+        type?: 'NOTE' | 'TASK';
+        scheduled_time?: string;
+        recurrence?: any;
+        author?: string;
+        version?: string;
+        category_path?: string;
+      }>;
+      categoryPath?: string;
+      conflictStrategy?: 'rename' | 'skip' | 'overwrite';
+    }) =>
+      request('/prompts/import', {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
+
+    export: (data: {
+      ids?: string[]; // 兼容旧版
+      includeContent?: boolean;
+      preserveStructure?: boolean; // 兼容旧版：全局标志
+      structuredIds?: string[]; // 新增：需要保留结构的 ID
+      flatIds?: string[]; // 新增：扁平导出的 ID
+    }) =>
+      request('/prompts/export', {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
   },
 
   /**
