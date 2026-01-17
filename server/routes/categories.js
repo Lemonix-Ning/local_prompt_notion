@@ -139,11 +139,8 @@ router.put('/rename', async (req, res, next) => {
   try {
     const { categoryPath, newName } = req.body;
 
-    console.log('[RENAME] Request:', { categoryPath, newName });
-
     // 验证输入
     if (!categoryPath || !newName || !newName.trim()) {
-      console.log('[RENAME] Validation failed: missing parameters');
       return res.status(400).json({
         success: false,
         error: 'Category path and new name are required',
@@ -151,9 +148,7 @@ router.put('/rename', async (req, res, next) => {
     }
 
     // 安全检查
-    console.log('[RENAME] Checking path safety:', { categoryPath, VAULT_ROOT });
     if (!isPathSafe(categoryPath, VAULT_ROOT)) {
-      console.log('[RENAME] Path safety check failed');
       return res.status(403).json({
         success: false,
         error: 'Invalid category path',
@@ -162,14 +157,11 @@ router.put('/rename', async (req, res, next) => {
 
     // 防止重命名根目录
     if (categoryPath === VAULT_ROOT) {
-      console.log('[RENAME] Cannot rename root');
       return res.status(403).json({
         success: false,
         error: 'Cannot rename vault root',
       });
     }
-
-    console.log('[RENAME] Calling renameCategory...');
     
     // 给 Vite 文件监视器时间来释放文件锁
     await new Promise(resolve => setTimeout(resolve, 500));

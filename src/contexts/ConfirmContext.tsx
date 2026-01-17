@@ -37,7 +37,6 @@ export const ConfirmProvider: React.FC<ConfirmProviderProps> = ({ children }) =>
   const [confirmState, setConfirmState] = useState<ConfirmState | null>(null);
 
   const confirm = (options: ConfirmOptions): Promise<boolean> => {
-    console.log('[ConfirmContext] confirm called with:', options);
     return new Promise((resolve) => {
       setConfirmState({
         isOpen: true,
@@ -48,7 +47,6 @@ export const ConfirmProvider: React.FC<ConfirmProviderProps> = ({ children }) =>
   };
 
   const handleConfirm = () => {
-    console.log('[ConfirmContext] handleConfirm');
     if (confirmState) {
       confirmState.resolve(true);
       setConfirmState(null);
@@ -56,7 +54,6 @@ export const ConfirmProvider: React.FC<ConfirmProviderProps> = ({ children }) =>
   };
 
   const handleCancel = () => {
-    console.log('[ConfirmContext] handleCancel');
     if (confirmState) {
       confirmState.resolve(false);
       setConfirmState(null);

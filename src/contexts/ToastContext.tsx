@@ -6,6 +6,7 @@ export interface Toast {
   message: string;
   type: 'success' | 'error' | 'warning' | 'info';
   duration?: number;
+  count?: number; // 消息计数
 }
 
 interface ToastContextType {
@@ -42,9 +43,34 @@ export const ToastProvider: React.FC<ToastProviderProps> = ({ children }) => {
     const message = isTypeFirst ? (b || '') : a;
     const duration = c;
 
-    const id = Date.now().toString();
-    const newToast: Toast = { id, message, type, duration };
-    setToasts(prev => [...prev, newToast]);
+    setToasts(prev => {
+      // 查找是否有相同类型和消息的 toast（在 3 秒内）
+      const now = Date.now();
+      const existingIndex = prev.findIndex(toast => {
+        const toastTime = parseInt(toast.id);
+        const timeDiff = now - toastTime;
+        return toast.message === message && 
+               toast.type === type && 
+               timeDiff < 3000; // 3秒内的相同消息合并
+      });
+
+      if (existingIndex !== -1) {
+        // 找到相同消息，增加计数
+        const updated = [...prev];
+        const oldToast = updated[existingIndex];
+        updated[existingIndex] = {
+          ...oldToast,
+          count: (oldToast.count || 1) + 1,
+          id: now.toString(), // 更新 ID 以重置定时器
+        };
+        return updated;
+      } else {
+        // 新消息
+        const id = now.toString();
+        const newToast: Toast = { id, message, type, duration, count: 1 };
+        return [...prev, newToast];
+      }
+    });
   }
 
   const removeToast = (id: string) => {
@@ -60,9 +86,10 @@ export const ToastProvider: React.FC<ToastProviderProps> = ({ children }) => {
 
 // 单个 Toast 项组件
 const ToastItem: React.FC<{ toast: Toast; onClose: (id: string) => void }> = ({ toast, onClose }) => {
-  const { id, type, message } = toast;
+  const { id, type, message, count } = toast;
 
   // 自动关闭逻辑 (3秒)
+  // 使用 id 作为依赖，每次 id 变化时重置定时器
   useEffect(() => {
     const timer = setTimeout(() => onClose(id), toast.duration ?? 3000);
     return () => clearTimeout(timer);
@@ -80,6 +107,7 @@ const ToastItem: React.FC<{ toast: Toast; onClose: (id: string) => void }> = ({ 
 
   return (
     <div
+      key={id} // 添加 key 确保 React 正确识别组件
       className={`
         pointer-events-auto flex items-center gap-3 px-4 py-3 rounded-xl
         min-w-[280px] max-w-sm group cursor-default
@@ -93,7 +121,14 @@ const ToastItem: React.FC<{ toast: Toast; onClose: (id: string) => void }> = ({ 
         <Icon size={16} />
       </div>
 
-      <span className="text-sm font-medium flex-1 truncate">{message}</span>
+      <div className="flex-1 flex items-center gap-2">
+        <span className="text-sm font-medium truncate">{message}</span>
+        {count && count > 1 && (
+          <span className={`text-xs font-semibold px-1.5 py-0.5 rounded ${bg} ${color}`}>
+            ×{count}
+          </span>
+        )}
+      </div>
 
       <button
         onClick={() => onClose(id)}

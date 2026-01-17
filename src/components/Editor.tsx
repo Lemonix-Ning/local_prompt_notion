@@ -30,7 +30,6 @@ export function Editor() {
   const getAllCategories = (): string[] => {
     const categories: string[] = [];
     if (!state.fileSystem?.categories) {
-      console.warn('Categories not loaded yet');
       return categories;
     }
     const traverse = (nodes: any[]) => {

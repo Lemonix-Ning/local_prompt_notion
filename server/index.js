@@ -7,11 +7,15 @@ const express = require('express');
 const cors = require('cors');
 const path = require('path');
 const fs = require('fs').promises;
+const { cleanupTrash } = require('./utils/fileSystem');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
 const rawVaultPath = process.env.VAULT_PATH && process.env.VAULT_PATH.trim();
 const VAULT_ROOT = rawVaultPath || path.join(__dirname, '../vault');
+
+// 回收站保留天数
+const TRASH_RETENTION_DAYS = 5;
 
 // 中间件
 app.use(cors());
@@ -72,6 +76,20 @@ async function startServer() {
     await fs.mkdir(VAULT_ROOT, { recursive: true });
     await fs.mkdir(path.join(VAULT_ROOT, 'trash'), { recursive: true });
     
+    // 启动时清理过期的回收站项目
+    const cleanupResult = await cleanupTrash(VAULT_ROOT, TRASH_RETENTION_DAYS);
+    if (cleanupResult.deletedCount > 0) {
+      console.log(`[STARTUP] Cleaned up ${cleanupResult.deletedCount} expired trash items`);
+    }
+    
+    // 每小时检查一次回收站
+    setInterval(async () => {
+      const result = await cleanupTrash(VAULT_ROOT, TRASH_RETENTION_DAYS);
+      if (result.deletedCount > 0) {
+        console.log(`[SCHEDULED] Cleaned up ${result.deletedCount} expired trash items`);
+      }
+    }, 60 * 60 * 1000); // 1 小时
+    
     app.listen(PORT, () => {
       console.log(`
 ╔════════════════════════════════════════════════╗
@@ -80,6 +98,7 @@ async function startServer() {
 ║   Server:  http://localhost:${PORT}             ║
 ║   API:     http://localhost:${PORT}/api         ║
 ║   Vault:   ${VAULT_ROOT}
+║   Trash:   ${TRASH_RETENTION_DAYS} days retention
 ╚════════════════════════════════════════════════╝
       `);
     });

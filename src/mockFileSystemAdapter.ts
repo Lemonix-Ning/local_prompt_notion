@@ -50,7 +50,7 @@ export class MockFileSystemAdapter implements IFileSystemAdapter {
     // 实际应用中这里应该有更复杂的实现
   }
 
-  async createPrompt(categoryPath: string, title: string): Promise<PromptData> {
+  async createPrompt(categoryPath: string, title: string, options?: { type?: 'NOTE' | 'TASK'; scheduled_time?: string }): Promise<PromptData> {
     const slug = title.toLowerCase().replace(/\s+/g, '_');
     const promptPath = `${categoryPath}/${slug}`;
 
@@ -69,6 +69,8 @@ export class MockFileSystemAdapter implements IFileSystemAdapter {
         top_p: 1.0,
       },
       is_favorite: false,
+      type: options?.type || 'NOTE',
+      scheduled_time: options?.scheduled_time,
     };
 
     const promptData: PromptData = {
@@ -81,9 +83,8 @@ export class MockFileSystemAdapter implements IFileSystemAdapter {
     return promptData;
   }
 
-  async createCategory(parentPath: string, name: string): Promise<void> {
-    // 模拟实现
-    console.log(`Creating category: ${parentPath}/${name}`);
+  async createCategory(_parentPath: string, _name: string): Promise<void> {
+    // Mock implementation
   }
 
   async renameCategory(categoryPath: string, newName: string): Promise<void> {
@@ -102,12 +103,32 @@ export class MockFileSystemAdapter implements IFileSystemAdapter {
     updateCategoryName(this.mockData.categories);
   }
 
-  async moveCategory(_categoryPath: string, _targetParentPath: string): Promise<{ name: string; path: string; usedFallback?: boolean }> {
-    throw new Error('MockFileSystemAdapter: moveCategory is not supported in mock mode');
+  async moveCategory(categoryPath: string, targetParentPath: string): Promise<{ name: string; path: string; usedFallback?: boolean }> {
+    // Mock 实现：返回移动后的分类信息
+    const categoryName = categoryPath.split('/').pop() || '';
+    const newPath = `${targetParentPath}/${categoryName}`;
+    
+    return {
+      name: categoryName,
+      path: newPath,
+      usedFallback: false,
+    };
   }
 
   async deleteCategory(categoryPath: string): Promise<void> {
-    console.log(`Deleting category: ${categoryPath}`);
+    // Mock 实现：从内存中删除分类
+    const removeCategory = (nodes: CategoryNode[], path: string): boolean => {
+      for (let i = 0; i < nodes.length; i++) {
+        if (nodes[i].path === path) {
+          nodes.splice(i, 1);
+          return true;
+        }
+        if (removeCategory(nodes[i].children, path)) return true;
+      }
+      return false;
+    };
+
+    removeCategory(this.mockData.categories, categoryPath);
   }
 
   searchPrompts(query: string, prompts: PromptData[]): PromptData[] {

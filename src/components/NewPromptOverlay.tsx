@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, useCallback, type ReactNode } from 'react';
 
 interface AnimationState {
   top: string | number;
@@ -124,7 +124,7 @@ export function NewPromptOverlay({
     return () => document.removeEventListener('keydown', onKeyDown);
   }, [mounted, isOpen, onRequestClose]);
 
-  const runClose = () => {
+  const runClose = useCallback(() => {
     if (isClosing) return;
     if (!animationState) {
       setMounted(false);
@@ -173,7 +173,7 @@ export function NewPromptOverlay({
       setIsClosing(false);
       onClosed();
     }, durationCloseMs);
-  };
+  }, [isClosing, animationState, originId, durationCloseMs, onClosed]);
 
   useEffect(() => {
     const prevIsOpen = prevIsOpenRef.current;
@@ -183,7 +183,7 @@ export function NewPromptOverlay({
     if (mounted && prevIsOpen && !isOpen) {
       runClose();
     }
-  }, [isOpen, mounted]);
+  }, [isOpen, mounted, runClose]);
 
   useEffect(() => {
     // 清理：确保 origin 显示恢复

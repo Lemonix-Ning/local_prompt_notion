@@ -152,7 +152,6 @@ export class FileSystemAdapter implements IFileSystemAdapter {
     try {
       content = await fs.readFile(contentPath, 'utf-8');
     } catch (error) {
-      console.warn(`Content file not found for ${promptPath}, creating empty content`);
       content = '';
     }
 
@@ -257,7 +256,7 @@ export class FileSystemAdapter implements IFileSystemAdapter {
   /**
    * 创建新提示词
    */
-  async createPrompt(categoryPath: string, title: string): Promise<PromptData> {
+  async createPrompt(categoryPath: string, title: string, options?: { type?: 'NOTE' | 'TASK'; scheduled_time?: string }): Promise<PromptData> {
     const slug = this.titleToSlug(title);
     const promptPath = path.join(categoryPath, slug);
 
@@ -285,6 +284,8 @@ export class FileSystemAdapter implements IFileSystemAdapter {
         top_p: 1.0,
       },
       is_favorite: false,
+      type: options?.type || 'NOTE',
+      scheduled_time: options?.scheduled_time,
     };
 
     const promptData: PromptData = {
@@ -429,9 +430,7 @@ export class MockFileSystemAdapter implements IFileSystemAdapter {
     categoryPath: string,
     newParentPath: string
   ): Promise<{ name: string; path: string; usedFallback?: boolean }> {
-    // Mock 环境模拟移动分类
-    console.log(`Moving category: ${categoryPath} to ${newParentPath}`);
-
+    // Mock environment simulates moving category
     const name = categoryPath.split(/[/\\]/).filter(Boolean).pop() || '';
     const newPath = `${newParentPath}/${name}`;
     return { name, path: newPath, usedFallback: true };
@@ -471,7 +470,7 @@ export class MockFileSystemAdapter implements IFileSystemAdapter {
     // 实际应用中这里应该有更复杂的实现
   }
 
-  async createPrompt(categoryPath: string, title: string): Promise<PromptData> {
+  async createPrompt(categoryPath: string, title: string, options?: { type?: 'NOTE' | 'TASK'; scheduled_time?: string }): Promise<PromptData> {
     const slug = title.toLowerCase().replace(/\s+/g, '_');
     const promptPath = `${categoryPath}/${slug}`;
 
@@ -490,6 +489,8 @@ export class MockFileSystemAdapter implements IFileSystemAdapter {
         top_p: 1.0,
       },
       is_favorite: false,
+      type: options?.type || 'NOTE',
+      scheduled_time: options?.scheduled_time,
     };
 
     const promptData: PromptData = {
@@ -507,12 +508,12 @@ export class MockFileSystemAdapter implements IFileSystemAdapter {
     console.log(`Creating category: ${parentPath}/${name}`);
   }
 
-  async renameCategory(categoryPath: string, newName: string): Promise<void> {
-    console.log(`Renaming category: ${categoryPath} to ${newName}`);
+  async renameCategory(_categoryPath: string, _newName: string): Promise<void> {
+    // Mock implementation
   }
 
-  async deleteCategory(categoryPath: string): Promise<void> {
-    console.log(`Deleting category: ${categoryPath}`);
+  async deleteCategory(_categoryPath: string): Promise<void> {
+    // Mock implementation
   }
 
   searchPrompts(query: string, prompts: PromptData[]): PromptData[] {

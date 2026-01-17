@@ -4,6 +4,115 @@
 
 @tailwind utilities;
 
+/* ========================================
+   Brand Splash - 光之构筑 动画
+   ======================================== */
+
+/* 1. 线条生长动画 */
+@keyframes draw-path {
+  0% { 
+    stroke-dashoffset: 200; 
+    opacity: 0; 
+  }
+  10% { 
+    opacity: 1; 
+  }
+  100% { 
+    stroke-dashoffset: 0; 
+    opacity: 1; 
+  }
+}
+
+/* 2. 颜色填充动画 */
+@keyframes fill-color {
+  0% { 
+    fill-opacity: 0; 
+  }
+  100% { 
+    fill-opacity: 1; 
+  }
+}
+
+/* 3. 文字上浮动画 */
+@keyframes text-slide-up {
+  0% { 
+    opacity: 0; 
+    transform: translateY(10px); 
+  }
+  100% { 
+    opacity: 1; 
+    transform: translateY(0); 
+  }
+}
+
+/* 4. 整体退出动画 (模糊升腾) */
+@keyframes blur-up-exit {
+  0% { 
+    opacity: 1; 
+    transform: translateY(0); 
+    filter: blur(0); 
+  }
+  100% { 
+    opacity: 0; 
+    transform: translateY(-20px); 
+    filter: blur(10px); 
+  }
+}
+
+/* 5. 发光脉冲动画 */
+@keyframes glow-pulse {
+  0%, 100% {
+    filter: drop-shadow(0 0 8px rgba(99, 102, 241, 0.6));
+  }
+  50% {
+    filter: drop-shadow(0 0 16px rgba(99, 102, 241, 0.9));
+  }
+}
+
+/* Splash 容器样式 */
+.splash-container {
+  transition: all 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.splash-container.animate-exit {
+  animation: blur-up-exit 0.6s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}
+
+/* SVG 路径样式 */
+.splash-path {
+  stroke-dasharray: 200;
+  stroke-dashoffset: 200;
+  fill-opacity: 0;
+}
+
+.splash-path-animate {
+  animation: 
+    draw-path 1.2s ease-out forwards,
+    fill-color 0.6s ease-out 1s forwards;
+}
+
+.splash-path-glow {
+  animation: glow-pulse 2s ease-in-out infinite;
+  animation-delay: 1.2s;
+}
+
+/* 文字动画样式 */
+.splash-text {
+  opacity: 0;
+}
+
+.splash-text-animate {
+  animation: text-slide-up 0.8s ease-out 1s forwards;
+}
+
+.splash-subtext-animate {
+  animation: text-slide-up 0.8s ease-out 1.2s forwards;
+}
+
+/* ========================================
+   原有动画
+   ======================================== */
+
 @keyframes empty-float {
   0%, 100% { transform: translateY(0); }
   50% { transform: translateY(-10px); }
@@ -18,6 +127,36 @@
     transform: translate3d(var(--tx), var(--ty), 200px) rotateX(var(--rx)) rotateY(var(--ry)) scale(0);
     opacity: 0;
   }
+}
+
+/* 🔥 ChronoAlert 粒子飞散动画 */
+@keyframes particle-fly {
+  0% {
+    transform: translate(-50%, -50%) scale(1);
+    opacity: 1;
+  }
+  100% {
+    transform: translate(calc(-50% + var(--tx)), calc(-50% + var(--ty))) scale(0);
+    opacity: 0;
+  }
+}
+
+/* 🔥 ChronoAlert 消散动画 */
+@keyframes disintegrate {
+  0% {
+    opacity: 1;
+    transform: translateX(-50%) scale(1);
+    filter: blur(0);
+  }
+  100% {
+    opacity: 0;
+    transform: translateX(-50%) scale(0.8);
+    filter: blur(4px);
+  }
+}
+
+.animate-disintegrate {
+  animation: disintegrate 0.4s ease-out forwards;
 }
 
 @keyframes shockwave-flash {
@@ -635,4 +774,313 @@ code {
 
 .create-accent-bar {
   background-color: var(--create-accent);
+}
+
+
+/* ========================================
+   Chrono Alert & Focus Mode 动画
+   ======================================== */
+
+/* 1. 顶部滑入动画 */
+@keyframes slide-down {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, -20px);
+  }
+  100% {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+}
+
+.animate-slide-down {
+  animation: slide-down 0.4s cubic-bezier(0.19, 1, 0.22, 1) forwards;
+}
+
+/* 2. 心跳脉冲动画 */
+@keyframes pulse-red {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.6;
+    transform: scale(1.1);
+  }
+}
+
+.pulse-red {
+  animation: pulse-red 2s ease-in-out infinite;
+}
+
+/* 3. 扫描线动画 */
+@keyframes scan-line {
+  0% {
+    transform: translateY(-100%);
+  }
+  100% {
+    transform: translateY(100%);
+  }
+}
+
+.scan-line {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, rgba(244, 63, 94, 0.5), transparent);
+  animation: scan-line 3s linear infinite;
+}
+
+/* 任务卡片的扫描线使用玫瑰色 */
+.task-card .scan-line {
+  background: linear-gradient(90deg, transparent, rgba(244, 63, 94, 0.4), transparent);
+}
+
+/* ChronoCard 的扫描线 */
+.chrono-card .scan-line {
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(244, 63, 94, 0.5), transparent);
+}
+
+/* ChronoCard 紧凑模式样式 */
+.chrono-compact {
+  backdrop-filter: blur(4px);
+}
+
+/* 4. Focus Mode 样式 */
+.focus-mode-active .simple-card:not(.card-focused) {
+  filter: blur(4px) grayscale(0.8);
+  opacity: 0.3;
+  pointer-events: none;
+  transition: all 0.5s ease;
+}
+
+.simple-card.card-focused {
+  z-index: 50;
+  position: relative;
+  border-color: #f43f5e;
+  transform: scale(1.05);
+  box-shadow: 0 0 0 100vmax rgba(0, 0, 0, 0.6);
+  transition: all 0.5s ease;
+  pointer-events: auto;
+}
+
+/* 焦点卡片的父容器也需要高 z-index */
+.focus-mode-active [data-card-wrapper]:has(.card-focused) {
+  z-index: 50;
+  position: relative;
+}
+
+/* 5. 呼吸边框动画 */
+@keyframes pulse-border {
+  0%, 100% {
+    border-color: rgba(244, 63, 94, 0.5);
+    box-shadow: 0 0 20px rgba(244, 63, 94, 0.3);
+  }
+  50% {
+    border-color: rgba(244, 63, 94, 1);
+    box-shadow: 0 0 40px rgba(244, 63, 94, 0.6);
+  }
+}
+
+.card-focused {
+  animation: pulse-border 2s ease-in-out infinite;
+}
+
+
+/* 6. 任务卡片样式 */
+.task-card {
+  background: linear-gradient(135deg, rgba(244, 63, 94, 0.05) 0%, rgba(0, 0, 0, 0) 50%);
+  border-color: rgba(244, 63, 94, 0.3) !important;
+}
+
+.task-card:hover {
+  border-color: rgba(244, 63, 94, 0.5) !important;
+  box-shadow: 0 0 20px rgba(244, 63, 94, 0.1);
+}
+
+/* 深色模式下的任务卡片 */
+:root.dark .task-card {
+  background: linear-gradient(135deg, rgba(244, 63, 94, 0.1) 0%, rgba(0, 0, 0, 0) 50%);
+}
+
+
+/* ========================================
+   Markdown 渲染样式 - OpenAI 风格
+   ======================================== */
+
+/* Markdown 容器基础样式 */
+.markdown-body {
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+}
+
+/* 代码块语法高亮覆盖 - 深色模式 */
+:root.dark .markdown-body pre code.hljs {
+  background: transparent !important;
+  padding: 0 !important;
+}
+
+:root.dark .markdown-body .hljs {
+  color: #e4e4e7;
+  background: transparent;
+}
+
+:root.dark .markdown-body .hljs-keyword,
+:root.dark .markdown-body .hljs-selector-tag,
+:root.dark .markdown-body .hljs-literal,
+:root.dark .markdown-body .hljs-section,
+:root.dark .markdown-body .hljs-link {
+  color: #c084fc;
+}
+
+:root.dark .markdown-body .hljs-string,
+:root.dark .markdown-body .hljs-title,
+:root.dark .markdown-body .hljs-name,
+:root.dark .markdown-body .hljs-type,
+:root.dark .markdown-body .hljs-attribute,
+:root.dark .markdown-body .hljs-symbol,
+:root.dark .markdown-body .hljs-bullet,
+:root.dark .markdown-body .hljs-addition,
+:root.dark .markdown-body .hljs-variable,
+:root.dark .markdown-body .hljs-template-tag,
+:root.dark .markdown-body .hljs-template-variable {
+  color: #4ade80;
+}
+
+:root.dark .markdown-body .hljs-comment,
+:root.dark .markdown-body .hljs-quote,
+:root.dark .markdown-body .hljs-deletion,
+:root.dark .markdown-body .hljs-meta {
+  color: #71717a;
+}
+
+:root.dark .markdown-body .hljs-number,
+:root.dark .markdown-body .hljs-regexp,
+:root.dark .markdown-body .hljs-literal,
+:root.dark .markdown-body .hljs-built_in {
+  color: #f97316;
+}
+
+:root.dark .markdown-body .hljs-function .hljs-title {
+  color: #60a5fa;
+}
+
+/* 代码块语法高亮覆盖 - 浅色模式 */
+.markdown-body pre code.hljs {
+  background: transparent !important;
+  padding: 0 !important;
+}
+
+.markdown-body .hljs {
+  color: #18181b;
+  background: transparent;
+}
+
+.markdown-body .hljs-keyword,
+.markdown-body .hljs-selector-tag,
+.markdown-body .hljs-literal,
+.markdown-body .hljs-section,
+.markdown-body .hljs-link {
+  color: #9333ea;
+}
+
+.markdown-body .hljs-string,
+.markdown-body .hljs-title,
+.markdown-body .hljs-name,
+.markdown-body .hljs-type,
+.markdown-body .hljs-attribute,
+.markdown-body .hljs-symbol,
+.markdown-body .hljs-bullet,
+.markdown-body .hljs-addition,
+.markdown-body .hljs-variable,
+.markdown-body .hljs-template-tag,
+.markdown-body .hljs-template-variable {
+  color: #16a34a;
+}
+
+.markdown-body .hljs-comment,
+.markdown-body .hljs-quote,
+.markdown-body .hljs-deletion,
+.markdown-body .hljs-meta {
+  color: #a1a1aa;
+}
+
+.markdown-body .hljs-number,
+.markdown-body .hljs-regexp,
+.markdown-body .hljs-literal,
+.markdown-body .hljs-built_in {
+  color: #ea580c;
+}
+
+.markdown-body .hljs-function .hljs-title {
+  color: #2563eb;
+}
+
+/* 任务列表样式 */
+.markdown-body ul:has(input[type="checkbox"]) {
+  list-style: none;
+  padding-left: 0;
+}
+
+.markdown-body ul:has(input[type="checkbox"]) li {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+/* 代码块滚动条样式 */
+.markdown-body pre::-webkit-scrollbar {
+  height: 6px;
+}
+
+.markdown-body pre::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.markdown-body pre::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 3px;
+}
+
+.markdown-body pre::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.3);
+}
+
+/* 浅色模式滚动条 */
+:root:not(.dark) .markdown-body pre::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.15);
+}
+
+:root:not(.dark) .markdown-body pre::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 0, 0, 0.25);
+}
+
+/* 链接悬停效果 */
+.markdown-body a:hover {
+  text-decoration: underline;
+}
+
+/* 图片加载占位 */
+.markdown-body img {
+  display: block;
+  background: linear-gradient(90deg, rgba(128, 128, 128, 0.1) 25%, rgba(128, 128, 128, 0.2) 50%, rgba(128, 128, 128, 0.1) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+}
+
+.markdown-body img[src] {
+  animation: none;
+  background: none;
+}
+
+@keyframes shimmer {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
 }

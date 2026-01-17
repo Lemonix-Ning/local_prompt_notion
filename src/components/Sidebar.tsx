@@ -5,9 +5,10 @@
 
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
-import { ChevronRight, Plus, Star, Book, Trash2, Folder, FolderOpen, Edit2, Settings, Sun, Moon, Check, X, FileText } from 'lucide-react';
+import { ChevronRight, Plus, Star, Book, Trash2, Folder, FolderOpen, Edit2, Settings, Sun, Moon, Check, X, FileText, Download } from 'lucide-react';
 import { CategoryNode } from '../types';
 import { useApp } from '../AppContext';
+import { ExportPromptsDialog } from './ExportPromptsDialog';
 import { useTheme } from '../contexts/ThemeContext';
 import { useToast } from '../contexts/ToastContext';
 import { ElasticScroll } from './ElasticScroll';
@@ -208,9 +209,10 @@ interface ContextMenuProps {
   onNewSubCategory: () => void;
   onNewPrompt: () => void;
   onMoveToRoot?: () => void;
+  onExport?: () => void;
 }
 
-function ContextMenu({ x, y, onClose, onRename, onDelete, onNewSubCategory, onNewPrompt, onMoveToRoot }: ContextMenuProps) {
+function ContextMenu({ x, y, onClose, onRename, onDelete, onNewSubCategory, onNewPrompt, onMoveToRoot, onExport }: ContextMenuProps) {
   const menuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -257,6 +259,18 @@ function ContextMenu({ x, y, onClose, onRename, onDelete, onNewSubCategory, onNe
         新建提示词
       </button>
       <div className="h-px bg-border my-1" />
+      {onExport && (
+        <>
+          <button
+            onClick={onExport}
+            className="w-full px-3 py-2 text-sm text-foreground hover:bg-accent flex items-center gap-2 transition-colors"
+          >
+            <Download size={14} />
+            导出分类
+          </button>
+          <div className="h-px bg-border my-1" />
+        </>
+      )}
       <button
         onClick={onNewSubCategory}
         className="w-full px-3 py-2 text-sm text-foreground hover:bg-accent flex items-center gap-2 transition-colors"
@@ -308,6 +322,9 @@ export function Sidebar() {
   }>({ isOpen: false, originId: '', categoryPath: '', categoryName: '', contentInfo: null });
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [rootContextMenu, setRootContextMenu] = useState<{ x: number; y: number } | null>(null);
+  const [exportCategoryPath, setExportCategoryPath] = useState<string | null>(null);
+  const [exportCategoryOriginId, setExportCategoryOriginId] = useState<string>('category-export');
+  const [exportDialogMounted, setExportDialogMounted] = useState(false);
   const newCategoryInputRef = useRef<HTMLInputElement>(null);
 
   // Resizable Sidebar State
@@ -504,6 +521,12 @@ export function Sidebar() {
     setNewCategoryParent(null);
   };
 
+  const handleExportCategory = (categoryPath: string, originId: string) => {
+    setExportCategoryOriginId(originId);
+    setExportCategoryPath(categoryPath);
+    setExportDialogMounted(true);
+  };
+
   const handleNewCategoryKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter') {
       e.preventDefault();
@@ -553,7 +576,7 @@ export function Sidebar() {
         try {
           await refreshVault();
         } catch (error) {
-          console.warn('Background refresh failed:', error);
+          // Background refresh failed
         }
       }, 1000);
       
@@ -750,6 +773,7 @@ export function Sidebar() {
                   onCreateSubCategory={handleStartCreateCategory}
                   onNewPrompt={handleNewPromptFromCategory}
                   onMove={handleMoveCategory}
+                  onExport={handleExportCategory}
                   rootPath={fileSystem.root}
                   isCreatingCategory={isCreatingCategory}
                   newCategoryParent={newCategoryParent}
@@ -858,6 +882,21 @@ export function Sidebar() {
         onCancel={handleDeleteCancel}
         onClosed={handleDeleteClosed}
       />
+
+      {/* 导出对话框 */}
+      {exportDialogMounted && (
+        <ExportPromptsDialog
+          isOpen={!!exportCategoryPath}
+          originId={exportCategoryOriginId}
+          onClose={() => setExportCategoryPath(null)}
+          onClosed={() => {
+            setExportCategoryPath(null);
+            setExportDialogMounted(false);
+          }}
+          categoryPath={exportCategoryPath || undefined}
+          preserveStructure={true} // 分类导出保留结构
+        />
+      )}
     </>
   );
 }
@@ -874,6 +913,7 @@ interface CategoryItemProps {
   onCreateSubCategory?: (parentPath: string) => void;
   onNewPrompt?: (categoryPath: string) => void;
   onMove?: (categoryPath: string, targetParentPath: string) => void;
+  onExport?: (categoryPath: string, originId: string) => void;
   rootPath?: string;
   level?: number;
   isCreatingCategory?: boolean;
@@ -899,6 +939,7 @@ function CategoryItem({
   onCreateSubCategory,
   onNewPrompt,
   onMove,
+  onExport,
   rootPath,
   level = 0,
   isCreatingCategory,
@@ -1055,6 +1096,14 @@ function CategoryItem({
     setContextMenu(null);
     if (onNewPrompt) {
       onNewPrompt(category.path);
+    }
+  };
+
+  const handleExport = () => {
+    setContextMenu(null);
+    if (onExport) {
+      const originId = `category-row-${category.path.replace(/[^a-zA-Z0-9_-]/g, '_')}`;
+      onExport(category.path, originId);
     }
   };
 
@@ -1265,6 +1314,7 @@ function CategoryItem({
               onCreateSubCategory={onCreateSubCategory}
               onNewPrompt={onNewPrompt}
               onMove={onMove}
+              onExport={onExport}
               rootPath={rootPath}
               level={level + 1}
               isCreatingCategory={isCreatingCategory}
@@ -1295,6 +1345,7 @@ function CategoryItem({
           onNewSubCategory={handleNewSubCategory}
           onNewPrompt={handleNewPrompt}
           onMoveToRoot={handleMoveToRoot}
+          onExport={handleExport}
         />
       )}
     </div>
