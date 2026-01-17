@@ -30,6 +30,11 @@ router.get('/scan', async (req, res, next) => {
     const rootPrompts = await loadPromptsInDirectory(VAULT_ROOT);
     allPrompts.push(...rootPrompts);
 
+    // 🔥 单独扫描回收站目录
+    const trashPath = path.join(VAULT_ROOT, 'trash');
+    const trashPrompts = await loadPromptsInDirectory(trashPath);
+    allPrompts.push(...trashPrompts);
+
     // 转换为 Map 格式
     const promptsMap = {};
     allPrompts.forEach(prompt => {

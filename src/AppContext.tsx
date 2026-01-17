@@ -28,7 +28,6 @@ function updateCategoryInFileSystem(
     // 查找并移除旧位置的分类
     const movedCategory = findAndRemoveCategory(updatedFileSystem.categories, oldCategoryPath);
     if (!movedCategory) {
-      console.warn('Could not find category to move:', oldCategoryPath);
       return null;
     }
     
@@ -355,7 +354,7 @@ interface AppContextType {
   savePrompt: (prompt: PromptData) => Promise<void>;
   deletePrompt: (promptId: string, permanent?: boolean) => Promise<void>;
   restorePrompt: (promptId: string) => Promise<void>;
-  createPrompt: (categoryPath: string, title: string) => Promise<PromptData>;
+  createPrompt: (categoryPath: string, title: string, options?: { type?: 'NOTE' | 'TASK'; scheduled_time?: string }) => Promise<PromptData>;
   createCategory: (parentPath: string, name: string) => Promise<void>;
   renameCategory: (categoryPath: string, newName: string) => Promise<void>;
   moveCategory: (categoryPath: string, targetParentPath: string) => Promise<void>;
@@ -390,7 +389,7 @@ export function AppProvider({ children, adapter }: AppProviderProps) {
       const fileSystem = await adapter.scanVault(lastRootPathRef.current);
       dispatch({ type: 'LOAD_VAULT', payload: fileSystem });
     } catch (error) {
-      console.error('Error refreshing vault:', error);
+      // Error refreshing vault
     }
   }, [adapter]);
 
@@ -404,7 +403,6 @@ export function AppProvider({ children, adapter }: AppProviderProps) {
       dispatch({ type: 'LOAD_VAULT', payload: fileSystem });
       lastRootPathRef.current = rootPath;
     } catch (error) {
-      console.error('Error loading vault:', error);
       dispatch({ type: 'SET_LOADING', payload: false });
     }
   }, [adapter]);
@@ -438,12 +436,17 @@ export function AppProvider({ children, adapter }: AppProviderProps) {
     try {
       const prompt = state.fileSystem?.allPrompts.get(promptId);
       if (!prompt) {
-        throw new Error('Prompt not found');
+        // 静默处理：提示词可能已被删除（快速连续点击的情况）
+        return;
       }
       await adapter.deletePrompt(prompt.path, permanent);
       dispatch({ type: 'DELETE_PROMPT', payload: promptId });
       await refreshVault();
     } catch (error) {
+      // 静默处理路径未索引的错误（快速连续删除导致）
+      if (error instanceof Error && error.message.includes('Prompt path not indexed')) {
+        return;
+      }
       console.error('Error deleting prompt:', error);
       throw error;
     }
@@ -469,9 +472,9 @@ export function AppProvider({ children, adapter }: AppProviderProps) {
   /**
    * 创建提示词
    */
-  const createPrompt = async (categoryPath: string, title: string) => {
+  const createPrompt = async (categoryPath: string, title: string, options?: { type?: 'NOTE' | 'TASK'; scheduled_time?: string }) => {
     try {
-      const newPrompt = await adapter.createPrompt(categoryPath, title);
+      const newPrompt = await adapter.createPrompt(categoryPath, title, options);
       dispatch({ type: 'CREATE_PROMPT', payload: newPrompt });
       await refreshVault();
       return newPrompt;
@@ -623,8 +626,16 @@ export function AppProvider({ children, adapter }: AppProviderProps) {
       );
     }
 
-    // 排序
+    // 排序（置顶的卡片始终在最前面）
     prompts.sort((a, b) => {
+      // 1. 置顶优先级最高
+      const aPinned = a.meta.is_pinned ?? false;
+      const bPinned = b.meta.is_pinned ?? false;
+      if (aPinned !== bPinned) {
+        return bPinned ? 1 : -1; // 置顶的排在前面
+      }
+
+      // 2. 如果置顶状态相同，按照用户选择的排序方式
       switch (state.sortBy) {
         case 'updated':
           return new Date(b.meta.updated_at).getTime() - new Date(a.meta.updated_at).getTime();

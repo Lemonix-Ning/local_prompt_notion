@@ -13,6 +13,21 @@ export interface ModelConfig {
 }
 
 /**
+ * 重复任务配置
+ */
+export interface RecurrenceConfig {
+  type: 'daily' | 'weekly' | 'monthly';
+  // 每周的哪几天 (0-6, 0=周日)
+  weekDays?: number[];
+  // 每月的哪几天 (1-31)
+  monthDays?: number[];
+  // 每天的触发时间 (HH:mm 格式)
+  time: string;
+  // 是否启用
+  enabled: boolean;
+}
+
+/**
  * 提示词元数据
  */
 export interface PromptMetadata {
@@ -26,9 +41,14 @@ export interface PromptMetadata {
   author: string;
   model_config: ModelConfig;
   is_favorite: boolean;
+  is_pinned?: boolean; // 是否置顶
   category?: string; // 分类标签(用于恢复和分类管理)
   category_path?: string;
   original_path?: string; // 删除前的原始路径(用于恢复)
+  type?: 'NOTE' | 'TASK'; // 资产类型
+  scheduled_time?: string | null; // 任务计划时间 (ISO 8601)，null 表示清除
+  recurrence?: RecurrenceConfig | null; // 重复任务配置，null 表示清除
+  last_notified?: string; // 上次通知时间 (ISO 8601)
 }
 
 /**
@@ -145,7 +165,7 @@ export interface IFileSystemAdapter {
   savePrompt(promptData: PromptData): Promise<void>;
   deletePrompt(promptPath: string, permanent?: boolean): Promise<void>;
   restorePrompt(promptPath: string): Promise<void>;
-  createPrompt(categoryPath: string, title: string): Promise<PromptData>;
+  createPrompt(categoryPath: string, title: string, options?: { type?: 'NOTE' | 'TASK'; scheduled_time?: string }): Promise<PromptData>;
   createCategory(parentPath: string, name: string): Promise<void>;
   renameCategory(categoryPath: string, newName: string): Promise<void>;
   moveCategory(categoryPath: string, targetParentPath: string): Promise<{ name: string; path: string; usedFallback?: boolean }>;

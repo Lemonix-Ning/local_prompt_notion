@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, forwardRef, type CSSProperties, type ReactNode } from 'react';
 
 type ElasticScrollProps = {
   className?: string;
@@ -7,7 +7,8 @@ type ElasticScrollProps = {
   onContextMenu?: React.MouseEventHandler<HTMLDivElement>;
 };
 
-export function ElasticScroll({ className, style, children, onContextMenu }: ElasticScrollProps) {
+export const ElasticScroll = forwardRef<HTMLDivElement, ElasticScrollProps>(
+  ({ className, style, children, onContextMenu }, forwardedRef) => {
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const bounceTimerRef = useRef<number | null>(null);
   const offsetRef = useRef(0);
@@ -19,6 +20,16 @@ export function ElasticScroll({ className, style, children, onContextMenu }: Ela
     if (isRubberBanding) return 'none';
     return 'transform 420ms cubic-bezier(0.19, 1, 0.22, 1)';
   }, [isRubberBanding]);
+  
+  // 合并 refs
+  const setRefs = (el: HTMLDivElement | null) => {
+    scrollRef.current = el;
+    if (typeof forwardedRef === 'function') {
+      forwardedRef(el);
+    } else if (forwardedRef) {
+      forwardedRef.current = el;
+    }
+  };
 
   useEffect(() => {
     const el = scrollRef.current;
@@ -93,9 +104,11 @@ export function ElasticScroll({ className, style, children, onContextMenu }: Ela
 
   return (
     <div className={className} style={{ ...style, overflow: 'hidden' }} onContextMenu={onContextMenu}>
-      <div ref={scrollRef} style={{ height: '100%', overflowY: 'auto', overscrollBehavior: 'none' }}>
+      <div ref={setRefs} style={{ height: '100%', overflowY: 'auto', overscrollBehavior: 'none' }}>
         <div style={{ transform: `translateY(${offsetY}px)`, transition, height: '100%' }}>{children}</div>
       </div>
     </div>
   );
-}
+});
+
+ElasticScroll.displayName = 'ElasticScroll';

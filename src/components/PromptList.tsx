@@ -18,6 +18,10 @@ import {
   Maximize2,
   PanelLeftClose,
   PanelLeftOpen,
+  Clock,
+  Upload,
+  Pin,
+  PinOff,
 } from 'lucide-react';
 import { useApp } from '../AppContext';
 import { useEffect, useRef, useState, type ReactNode, useMemo } from 'react';
@@ -33,6 +37,14 @@ import { NewPromptOverlay } from './NewPromptOverlay';
 import { ElasticScroll } from './ElasticScroll';
 import { EmptyState } from './EmptyState';
 import { DisintegrateOverlay } from './DisintegrateOverlay';
+import { ChronoAlert } from './ChronoAlert';
+import { ChronoCard } from './ChronoCard';
+import { RecurrenceSelector } from './RecurrenceSelector';
+import { ImportPromptsDialog } from './ImportPromptsDialog';
+import { ExportPromptsDialog } from './ExportPromptsDialog';
+import { useSystemNotification } from '../hooks/useSystemNotification';
+import { generateRecurrenceTag, generateScheduledTimeTag, getNextTriggerTime } from '../utils/recurrenceTag';
+import type { PromptData, RecurrenceConfig } from '../types';
 
 function SpotlightCard({
   children,
@@ -41,7 +53,7 @@ function SpotlightCard({
 }: {
   children: ReactNode;
   className?: string;
-  onClick?: () => void;
+  onClick?: (e: React.MouseEvent<HTMLDivElement>) => void;
 }) {
   const [position, setPosition] = useState({ x: 0, y: 0 });
   const [opacity, setOpacity] = useState(0);
@@ -129,7 +141,7 @@ const getTagColor = (tag: string) => {
 };
 
 export function PromptList() {
-  const { state, dispatch, getFilteredPrompts, createPrompt, savePrompt, deletePrompt, restorePrompt, createCategory } = useApp();
+  const { state, dispatch, getFilteredPrompts, createPrompt, savePrompt, deletePrompt, restorePrompt, createCategory, adapter, refreshVault } = useApp();
   const { searchQuery, selectedCategory, uiState } = state;
   const { showToast } = useToast();
   const { confirm } = useConfirm();
@@ -145,7 +157,10 @@ export function PromptList() {
     title: '', 
     content: '', 
     category: '', 
-    tags: '' 
+    tags: '',
+    type: 'NOTE' as 'NOTE' | 'TASK',
+    scheduledTime: '',
+    recurrence: undefined as RecurrenceConfig | undefined,
   });
   // 现在使用 EditorOverlay 系统，不再需要本地编辑状态
   // const [editingPromptId, setEditingPromptId] = useState<string | null>(null);
@@ -165,10 +180,78 @@ export function PromptList() {
   const [columnCount, setColumnCount] = useState<number>(3);
   const cardRefs = useRef<(HTMLDivElement | null)[]>([]);
   const [isKeyboardNavigation, setIsKeyboardNavigation] = useState<boolean>(false); // 🔥 新增：标记是否为键盘导航
+  
+  // ========== Focus Mode (专注模式) ==========
+  const [focusModeActive, setFocusModeActive] = useState<boolean>(false);
+  const [focusedCardId, setFocusedCardId] = useState<string | null>(null);
+  
+  // ========== Chrono Alert (时空警报) ==========
+  const [alertTask, setAlertTask] = useState<PromptData | null>(null);
+  const [dismissedAlerts, setDismissedAlerts] = useState<Set<string>>(new Set());
+  const [notifiedTasks, setNotifiedTasks] = useState<Set<string>>(new Set()); // 已发送系统通知的任务
+  
+  // ========== System Notification (系统通知) ==========
+  const { sendTaskReminder, isSupported: notificationSupported } = useSystemNotification();
+  
+  // ========== Import Dialog (导入对话框) ==========
+  const [showImportDialog, setShowImportDialog] = useState<boolean>(false);
+  const [importDialogMounted, setImportDialogMounted] = useState<boolean>(false);
+  
+  // ========== Export Dialog (导出对话框) ==========
+  const [showExportDialog, setShowExportDialog] = useState<boolean>(false);
+  const [exportConfig, setExportConfig] = useState<{ 
+    preSelectedIds?: string[]; 
+    categoryPath?: string;
+    preserveStructure?: boolean;
+  }>({});
+  
   // 编辑器扩展功能（预留）
   // const [isEditorExpanded, setIsEditorExpanded] = useState(false);
   // const [editorClickCount, setEditorClickCount] = useState(0);
   // const editorClickTimerRef = useRef<number | null>(null);
+
+  // ========== 辅助函数：生成带重复标识的标题 ==========
+  const getTaskTitleWithRepeatIndicator = (prompt: PromptData): string => {
+    const baseTitle = prompt.meta.title;
+    
+    // 只有重复任务才添加标识
+    if (prompt.meta.type !== 'TASK' || !prompt.meta.recurrence) {
+      return baseTitle;
+    }
+    
+    try {
+      // 计算重复次数
+      const createdDate = new Date(prompt.meta.created_at);
+      const now = new Date();
+      
+      // 重置时间到当天开始，只比较日期
+      createdDate.setHours(0, 0, 0, 0);
+      now.setHours(0, 0, 0, 0);
+      
+      const daysDiff = Math.floor((now.getTime() - createdDate.getTime()) / (24 * 60 * 60 * 1000));
+      
+      let repeatCount = 1; // 默认从 1 开始
+      
+      if (prompt.meta.recurrence.type === 'daily') {
+        // 每日任务：天数差 + 1
+        repeatCount = daysDiff + 1;
+      } else if (prompt.meta.recurrence.type === 'weekly') {
+        // 每周任务：周数差 + 1
+        repeatCount = Math.floor(daysDiff / 7) + 1;
+      } else if (prompt.meta.recurrence.type === 'monthly') {
+        // 每月任务：月数差 + 1
+        repeatCount = Math.floor(daysDiff / 30) + 1;
+      }
+      
+      // 确保至少是 1
+      repeatCount = Math.max(1, repeatCount);
+      
+      return `${baseTitle} X${repeatCount}`;
+    } catch (error) {
+      // 如果计算出错，返回原标题
+      return baseTitle;
+    }
+  };
 
   const fireworkParticles = useMemo(() => {
     return Array.from({ length: 8 }).map((_, i) => {
@@ -188,6 +271,218 @@ export function PromptList() {
   const prompts = getFilteredPrompts();
   const isModalOpen = uiState.newPromptModal.isOpen;
   const preselectedCategory = uiState.newPromptModal.preselectedCategory;
+
+  // ========== 扫描过期任务 (Scan Expired Tasks) ==========
+  // 🔥 使用 ref 存储最新的状态，避免 setInterval 闭包问题
+  const allPromptsRef = useRef<Map<string, PromptData>>(new Map());
+  const dismissedAlertsRef = useRef<Set<string>>(new Set());
+  const notifiedTasksRef = useRef<Set<string>>(new Set());
+  const alertTaskRef = useRef<PromptData | null>(null);
+  
+  // 🔥 检查过期任务的核心函数（提取出来避免闭包问题）
+  const checkExpiredTasksCore = async () => {
+    const now = Date.now();
+    
+    // 使用 ref 获取最新的 allPrompts
+    const allPrompts = Array.from(allPromptsRef.current.values());
+    const currentDismissedAlerts = dismissedAlertsRef.current;
+    const currentNotifiedTasks = notifiedTasksRef.current;
+    const currentAlertTask = alertTaskRef.current;
+    
+    // 🔥 过期超过 1 小时的任务不再触发通知（避免每次启动都重复提醒）
+    const ONE_HOUR = 60 * 60 * 1000;
+    
+    // 查找所有过期的任务（一次性任务）- 排除回收站中的任务
+    const expiredTasks = allPrompts.filter(prompt => {
+      if (prompt.meta.type !== 'TASK') return false;
+      if (!prompt.meta.scheduled_time) return false;
+      if (currentDismissedAlerts.has(prompt.meta.id)) return false;
+      // 排除回收站中的任务
+      if (prompt.path?.includes('/trash/') || prompt.path?.includes('\\trash\\')) return false;
+      
+      const scheduledTime = new Date(prompt.meta.scheduled_time).getTime();
+      // 🔥 只触发刚过期的任务（1小时内），超过1小时的不再提醒
+      const isExpired = scheduledTime <= now;
+      const isRecentlyExpired = (now - scheduledTime) <= ONE_HOUR;
+      return isExpired && isRecentlyExpired;
+    });
+    
+    // 检查重复任务 - 排除回收站中的任务
+    const recurringTasks = allPrompts.filter(prompt => {
+      if (prompt.meta.type !== 'TASK') return false;
+      if (!prompt.meta.recurrence?.enabled) return false;
+      if (currentDismissedAlerts.has(prompt.meta.id)) return false;
+      // 排除回收站中的任务
+      if (prompt.path?.includes('/trash/') || prompt.path?.includes('\\trash\\')) return false;
+      
+      // 内联检查重复任务触发条件
+      const recurrence = prompt.meta.recurrence;
+      if (!recurrence.enabled) return false;
+      
+      const nowDate = new Date();
+      const [hours, minutes] = recurrence.time.split(':').map(Number);
+      const todayTriggerTime = new Date(nowDate.getFullYear(), nowDate.getMonth(), nowDate.getDate(), hours, minutes, 0);
+      
+      if (nowDate < todayTriggerTime) return false;
+      
+      if (prompt.meta.last_notified) {
+        const lastNotifiedDate = new Date(prompt.meta.last_notified);
+        if (lastNotifiedDate.toDateString() === nowDate.toDateString()) {
+          return false;
+        }
+      }
+      
+      if (prompt.meta.created_at) {
+        const createdDate = new Date(prompt.meta.created_at);
+        if (createdDate.toDateString() === nowDate.toDateString() && createdDate > todayTriggerTime) {
+          return false;
+        }
+      }
+      
+      switch (recurrence.type) {
+        case 'daily':
+          return true;
+        case 'weekly':
+          return recurrence.weekDays?.includes(nowDate.getDay()) ?? false;
+        case 'monthly':
+          return recurrence.monthDays?.includes(nowDate.getDate()) ?? false;
+        default:
+          return false;
+      }
+    });
+    
+    // 合并所有需要提醒的任务
+    const allAlertTasks = [...expiredTasks, ...recurringTasks];
+    
+    // 发送系统通知（只发送一次）
+    for (const task of allAlertTasks) {
+      if (!currentNotifiedTasks.has(task.meta.id) && notificationSupported) {
+        const isExpired = expiredTasks.includes(task);
+        await sendTaskReminder(task.meta.title, isExpired);
+        setNotifiedTasks(prev => new Set(prev).add(task.meta.id));
+      }
+    }
+    
+    // 显示第一个任务的页面警报
+    if (allAlertTasks.length > 0 && !currentAlertTask) {
+      setAlertTask(allAlertTasks[0]);
+    }
+  };
+  
+  // 同步 ref 与 state，并在数据变化时立即检查
+  useEffect(() => {
+    const newAllPrompts = state.fileSystem?.allPrompts || new Map();
+    allPromptsRef.current = newAllPrompts;
+    
+    // 🔥 关键：当 allPrompts 数据变化时，立即检查过期任务
+    if (newAllPrompts.size > 0) {
+      checkExpiredTasksCore();
+    }
+  }, [state.fileSystem?.allPrompts]);
+  
+  useEffect(() => {
+    dismissedAlertsRef.current = dismissedAlerts;
+  }, [dismissedAlerts]);
+  
+  useEffect(() => {
+    notifiedTasksRef.current = notifiedTasks;
+  }, [notifiedTasks]);
+  
+  useEffect(() => {
+    alertTaskRef.current = alertTask;
+  }, [alertTask]);
+  
+  // 定时检查（每 5 秒）
+  useEffect(() => {
+    const timer = setInterval(checkExpiredTasksCore, 5000);
+    return () => clearInterval(timer);
+  }, [notificationSupported, sendTaskReminder]);
+
+
+  // ========== Focus Mode 处理函数 ==========
+  const enterFocusMode = (promptId: string) => {
+    setFocusedCardId(promptId);
+    setFocusModeActive(true);
+    
+    // 滚动到目标卡片
+    setTimeout(() => {
+      const element = document.getElementById(`card-${promptId}`);
+      if (element) {
+        element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+    }, 100);
+  };
+  
+  const exitFocusMode = () => {
+    setFocusModeActive(false);
+    setFocusedCardId(null);
+  };
+  
+  // ========== Chrono Alert 处理函数 ==========
+  const handleAlertFocus = () => {
+    if (alertTask) {
+      // 🔥 先切换到"全部"视图，确保任务卡片可见
+      dispatch({ type: 'SELECT_CATEGORY', payload: null });
+      
+      // 等待视图切换完成后再进入 Focus Mode
+      setTimeout(() => {
+        enterFocusMode(alertTask.meta.id);
+      }, 150);
+      
+      setAlertTask(null);
+    }
+  };
+  
+  const handleAlertDismiss = async () => {
+    if (alertTask) {
+      const taskId = alertTask.meta.id;
+      
+      // 🔥 先切换到"全部"视图，让卡片可见
+      dispatch({ type: 'SELECT_CATEGORY', payload: null });
+      
+      // 🔥 先关闭通知栏
+      setAlertTask(null);
+      setDismissedAlerts(prev => new Set(prev).add(taskId));
+      
+      // 🔥 等待视图切换，然后触发卡片删除动画
+      setTimeout(async () => {
+        // 触发删除动画
+        setDeletingIds(prev => {
+          const next = new Set(prev);
+          next.add(taskId);
+          return next;
+        });
+        
+        // 等待动画完成后删除
+        setTimeout(async () => {
+          try {
+            await deletePrompt(taskId, false); // false = 移动到回收站
+            showToast('任务已移至回收站', 'success');
+          } catch (error) {
+            showToast('移动失败', 'error');
+          } finally {
+            setDeletingIds(prev => {
+              const next = new Set(prev);
+              next.delete(taskId);
+              return next;
+            });
+          }
+        }, 600); // 等待粒子动画完成
+      }, 150); // 等待视图切换
+    }
+  };
+  
+  // ========== ESC 键退出 Focus Mode ==========
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && focusModeActive) {
+        exitFocusMode();
+      }
+    };
+    
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [focusModeActive]);
 
   useEffect(() => {
     return () => {
@@ -342,7 +637,6 @@ export function PromptList() {
   const handleEditorSpaceKey = () => {
     // 编辑器扩展功能（预留）
     // 可以在这里实现：第一次空格进入编辑，第二次放大，第三次全屏，第四次关闭
-    console.log('Editor space key pressed');
     /*
     setEditorClickCount((prev) => {
       const newCount = prev + 1;
@@ -463,7 +757,6 @@ export function PromptList() {
       await new Promise(resolve => setTimeout(resolve, 100));
       
     } catch (error) {
-      console.error('Window maximize/unmaximize error:', error);
       // 忽略错误，可能不在 Tauri 环境中
     }
   };
@@ -689,7 +982,6 @@ export function PromptList() {
       const appWindow = getCurrentWindow();
       await appWindow.minimize();
     } catch (error) {
-      console.error('Failed to minimize window:', error);
       showToast('最小化失败: ' + (error instanceof Error ? error.message : String(error)), 'error');
     }
   };
@@ -719,20 +1011,16 @@ export function PromptList() {
       await new Promise(resolve => setTimeout(resolve, 100));
       
     } catch (error) {
-      console.error('Failed to toggle maximize:', error);
       showToast('窗口最大化失败: ' + (error instanceof Error ? error.message : String(error)), 'error');
     }
   };
 
   const handleClose = async () => {
-    console.log('[handleClose] Called');
-    
     // 简单测试：先用 window.confirm 测试按钮是否工作
     const useNativeConfirm = false; // 设为 true 可以测试原生对话框
     
     if (useNativeConfirm) {
       const result = window.confirm('最小化到托盘？\n\n点击"确定"最小化到托盘\n点击"取消"完全退出');
-      console.log('[handleClose] native confirm result:', result);
       
       if (result) {
         try {
@@ -740,14 +1028,14 @@ export function PromptList() {
           const appWindow = getCurrentWindow();
           await appWindow.hide();
         } catch (e) {
-          console.error('[handleClose] hide error:', e);
+          // Hide error
         }
       } else {
         try {
           const { invoke } = await import('@tauri-apps/api/core');
           await invoke('exit_app');
         } catch (e) {
-          console.error('[handleClose] exit error:', e);
+          // Exit error
         }
       }
       return;
@@ -755,7 +1043,6 @@ export function PromptList() {
     
     try {
       // 弹出确认对话框
-      console.log('[handleClose] Calling confirm...');
       const result = await confirm({
         title: '关闭窗口',
         message: '选择关闭方式：',
@@ -763,8 +1050,6 @@ export function PromptList() {
         cancelText: '完全退出',
         type: 'info',
       });
-      
-      console.log('[handleClose] confirm result:', result);
       
       // result 为 true 表示点击了"最小化到托盘"
       // result 为 false 表示点击了"完全退出"
@@ -774,31 +1059,28 @@ export function PromptList() {
           const { getCurrentWindow } = await import('@tauri-apps/api/window');
           const appWindow = getCurrentWindow();
           await appWindow.hide();
-          console.log('[handleClose] Window hidden');
         } catch (hideError) {
-          console.error('[handleClose] Failed to hide window:', hideError);
+          // Failed to hide window
         }
       } else if (result === false) {
         // 完全退出程序 - 通过 Tauri 命令
         try {
           const { invoke } = await import('@tauri-apps/api/core');
-          console.log('[handleClose] Invoking exit_app...');
           await invoke('exit_app');
         } catch (invokeError) {
-          console.error('[handleClose] invoke exit_app failed:', invokeError);
           // 如果 invoke 失败，尝试直接销毁窗口
           try {
             const { getCurrentWindow } = await import('@tauri-apps/api/window');
             const appWindow = getCurrentWindow();
             await appWindow.destroy();
           } catch (destroyError) {
-            console.error('[handleClose] destroy also failed:', destroyError);
+            // Destroy also failed
           }
         }
       }
       // 如果 result 是其他值（如 undefined），不做任何操作
     } catch (error) {
-      console.error('[handleClose] Error:', error);
+      // Error handling close
     }
   };
 
@@ -857,7 +1139,6 @@ export function PromptList() {
         await appWindow.startDragging();
       }
     } catch (error) {
-      console.error('Window dragging error:', error);
       // 忽略错误，可能不在Tauri环境中
     }
   };
@@ -1007,13 +1288,61 @@ export function PromptList() {
     }
   };
 
+  // ========== 置顶功能 (Pin) ==========
+  const togglePin = async (promptId: string) => {
+    const prompt = state.fileSystem?.allPrompts.get(promptId);
+    if (!prompt) return;
+
+    const newPinnedState = !prompt.meta.is_pinned;
+
+    const updated = {
+      ...prompt,
+      meta: { ...prompt.meta, is_pinned: newPinnedState }
+    };
+    
+    try {
+      await savePrompt(updated);
+      // 强制刷新以确保 UI 更新
+      await refreshVault();
+    } catch (error) {
+      showToast("置顶失败", 'error');
+    }
+  };
+
   const [deletingIds, setDeletingIds] = useState<Set<string>>(new Set());
+  
+  // ========== 批量删除状态 (Batch Delete) ==========
+  const [batchSelectMode, setBatchSelectMode] = useState<boolean>(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  
+  // ========== 导出选择模式 (Export Select Mode) ==========
+  const [exportSelectMode, setExportSelectMode] = useState<boolean>(false);
+  const [exportSelectedIds, setExportSelectedIds] = useState<Set<string>>(new Set());
+  
+  // ========== 拖拽选择状态 (Drag Selection) ==========
+  const [isDragging, setIsDragging] = useState<boolean>(false);
+  const [dragStartId, setDragStartId] = useState<string | null>(null);
+  const dragSelectionRef = useRef<Set<string>>(new Set());
+  const autoScrollIntervalRef = useRef<number | null>(null);
+  const scrollContainerRef = useRef<HTMLDivElement | null>(null);
+
+  // 删除队列管理（用于批量显示 toast）
+  const deleteQueueRef = useRef<{
+    timer: NodeJS.Timeout | null;
+    count: number;
+    type: 'trash' | 'permanent';
+  }>({ timer: null, count: 0, type: 'trash' });
 
   const handleDelete = async (promptId: string) => {
+    // 防止重复删除：如果正在删除中，直接返回
+    if (deletingIds.has(promptId)) {
+      return;
+    }
+    
     const isInTrash = selectedCategory === 'trash';
     
     if (isInTrash) {
-      // 在回收站中,永久删除
+      // 在回收站中,永久删除（不使用队列，因为有确认对话框）
       const confirmed = await confirm({
         title: '永久删除提示词',
         message: '确定要永久删除这个提示词吗？此操作无法撤销！',
@@ -1045,7 +1374,7 @@ export function PromptList() {
         }, 600);
       }
     } else {
-      // 不在回收站,直接移动到回收站（带动画）
+      // 不在回收站,直接移动到回收站（带动画 + 队列合并 toast）
       setDeletingIds(prev => {
         const next = new Set(prev);
         next.add(promptId);
@@ -1056,7 +1385,26 @@ export function PromptList() {
       window.setTimeout(async () => {
         try {
           await deletePrompt(promptId, false);
-          showToast("已移动到回收站，可从回收站恢复", 'success');
+          
+          // 批量 toast 逻辑
+          deleteQueueRef.current.count++;
+          deleteQueueRef.current.type = 'trash';
+          
+          if (deleteQueueRef.current.timer) {
+            clearTimeout(deleteQueueRef.current.timer);
+          }
+          
+          deleteQueueRef.current.timer = setTimeout(() => {
+            const count = deleteQueueRef.current.count;
+            if (count === 1) {
+              showToast("已移动到回收站，可从回收站恢复", 'success');
+            } else {
+              showToast(`已移动 ${count} 个提示词到回收站`, 'success');
+            }
+            deleteQueueRef.current.count = 0;
+            deleteQueueRef.current.timer = null;
+          }, 300); // 300ms 内的删除操作合并
+          
         } catch (error) {
           showToast("删除失败", 'error');
         } finally {
@@ -1078,6 +1426,335 @@ export function PromptList() {
       showToast("恢复失败", 'error');
     }
   };
+  
+  // ========== 批量删除处理函数 (Batch Delete Handlers) ==========
+  const toggleBatchSelect = (promptId: string) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(promptId)) {
+        next.delete(promptId);
+      } else {
+        next.add(promptId);
+      }
+      return next;
+    });
+  };
+  
+  const selectAll = () => {
+    const allIds = new Set(prompts.map(p => p.meta.id));
+    setSelectedIds(allIds);
+  };
+  
+  const deselectAll = () => {
+    setSelectedIds(new Set());
+  };
+  
+  // ========== 导出选择模式函数 (Export Select Mode) ==========
+  const toggleExportSelect = (promptId: string) => {
+    setExportSelectedIds(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(promptId)) {
+        newSet.delete(promptId);
+      } else {
+        newSet.add(promptId);
+      }
+      return newSet;
+    });
+  };
+
+  const selectAllForExport = () => {
+    const allIds = new Set(prompts.map(p => p.meta.id));
+    setExportSelectedIds(allIds);
+  };
+
+  const deselectAllForExport = () => {
+    setExportSelectedIds(new Set());
+  };
+
+  const handleExportSelected = () => {
+    if (exportSelectedIds.size === 0) {
+      showToast('请至少选择一个提示词', 'error');
+      return;
+    }
+
+    // 如果选中了特定分类，使用树形结构导出
+    if (selectedCategory && selectedCategory !== 'all' && selectedCategory !== 'favorites' && selectedCategory !== 'trash') {
+      setExportConfig({ 
+        preSelectedIds: Array.from(exportSelectedIds),
+        categoryPath: selectedCategory,
+        preserveStructure: true,
+      });
+    } else {
+      // 否则使用扁平结构导出
+      setExportConfig({ 
+        preSelectedIds: Array.from(exportSelectedIds),
+        preserveStructure: false,
+      });
+    }
+    
+    setShowExportDialog(true);
+    setExportSelectMode(false);
+    setExportSelectedIds(new Set());
+  };
+  
+  // ========== 拖拽选择处理函数 (Drag Selection Handlers) ==========
+  const handleDragStart = (promptId: string) => {
+    if (!batchSelectMode) return;
+    
+    setIsDragging(true);
+    setDragStartId(promptId);
+    
+    // 初始化拖拽选择集合，包含起始卡片
+    const initialSelection = new Set(selectedIds);
+    initialSelection.add(promptId);
+    dragSelectionRef.current = initialSelection;
+    setSelectedIds(initialSelection);
+  };
+  
+  const handleDragEnter = (promptId: string) => {
+    if (!isDragging || !dragStartId || !batchSelectMode) return;
+    
+    // 找到起始卡片和当前卡片的索引
+    const startIndex = prompts.findIndex(p => p.meta.id === dragStartId);
+    const currentIndex = prompts.findIndex(p => p.meta.id === promptId);
+    
+    if (startIndex === -1 || currentIndex === -1) return;
+    
+    // 计算范围（支持向上和向下滑动）
+    const minIndex = Math.min(startIndex, currentIndex);
+    const maxIndex = Math.max(startIndex, currentIndex);
+    
+    // 选中范围内的所有卡片
+    const rangeSelection = new Set(selectedIds);
+    for (let i = minIndex; i <= maxIndex; i++) {
+      rangeSelection.add(prompts[i].meta.id);
+    }
+    
+    dragSelectionRef.current = rangeSelection;
+    setSelectedIds(rangeSelection);
+  };
+  
+  const handleDragEnd = () => {
+    setIsDragging(false);
+    setDragStartId(null);
+    
+    // 停止自动滚动
+    if (autoScrollIntervalRef.current) {
+      window.clearInterval(autoScrollIntervalRef.current);
+      autoScrollIntervalRef.current = null;
+    }
+  };
+  
+  // ========== 自动滚动处理函数 (Auto Scroll Handlers) ==========
+  const handleMouseMove = (e: MouseEvent) => {
+    if (!isDragging || !batchSelectMode) return;
+    
+    const scrollContainer = scrollContainerRef.current;
+    if (!scrollContainer) return;
+    
+    const containerRect = scrollContainer.getBoundingClientRect();
+    const mouseY = e.clientY;
+    
+    // 定义滚动触发区域（距离容器边缘的像素）
+    const scrollZone = 100;
+    const scrollSpeed = 10;
+    
+    // 清除之前的自动滚动
+    if (autoScrollIntervalRef.current) {
+      window.clearInterval(autoScrollIntervalRef.current);
+      autoScrollIntervalRef.current = null;
+    }
+    
+    // 检查是否在顶部滚动区域
+    if (mouseY < containerRect.top + scrollZone) {
+      autoScrollIntervalRef.current = window.setInterval(() => {
+        scrollContainer.scrollBy({ top: -scrollSpeed, behavior: 'auto' });
+      }, 16); // ~60fps
+    }
+    // 检查是否在底部滚动区域
+    else if (mouseY > containerRect.bottom - scrollZone) {
+      autoScrollIntervalRef.current = window.setInterval(() => {
+        scrollContainer.scrollBy({ top: scrollSpeed, behavior: 'auto' });
+      }, 16); // ~60fps
+    }
+  };
+  
+  const handleBatchDelete = async () => {
+    if (selectedIds.size === 0) {
+      showToast("请先选择要删除的项目", 'warning');
+      return;
+    }
+    
+    const confirmed = await confirm({
+      title: '批量永久删除',
+      message: `确定要永久删除选中的 ${selectedIds.size} 个提示词吗？此操作无法撤销！`,
+      confirmText: '永久删除',
+      cancelText: '取消',
+      type: 'danger',
+    });
+    
+    if (!confirmed) return;
+    
+    const totalCount = selectedIds.size;
+    const selectedIdsArray = Array.from(selectedIds);
+    
+    // 🚀 优化：对于大量删除（50+），跳过动画直接删除
+    const skipAnimation = totalCount >= 50;
+    
+    if (skipAnimation) {
+      // 大量删除：跳过动画，直接删除
+      // 立即标记为删除中（不播放动画）
+      setDeletingIds(new Set(selectedIds));
+    } else {
+      // 少量删除：分批显示删除动画（每批 10 个）
+      const batchSize = 10;
+      const batches = [];
+      for (let i = 0; i < selectedIdsArray.length; i += batchSize) {
+        batches.push(selectedIdsArray.slice(i, i + batchSize));
+      }
+      
+      // 分批添加删除动画
+      for (let i = 0; i < batches.length; i++) {
+        const batch = batches[i];
+        setDeletingIds(prev => {
+          const next = new Set(prev);
+          batch.forEach(id => next.add(id));
+          return next;
+        });
+        
+        // 每批之间间隔 50ms，让动画更流畅
+        if (i < batches.length - 1) {
+          await new Promise(resolve => setTimeout(resolve, 50));
+        }
+      }
+      
+      // 🚀 优化：只等待 300ms（而不是 600ms），让删除更快开始
+      await new Promise(resolve => setTimeout(resolve, 300));
+    }
+    
+    try {
+      // 使用批量删除 API（如果适配器支持）
+      if ('batchDeletePrompts' in adapter && typeof adapter.batchDeletePrompts === 'function') {
+        const promptPaths: string[] = [];
+        selectedIds.forEach(id => {
+          const prompt = state.fileSystem?.allPrompts.get(id);
+          if (prompt) {
+            promptPaths.push(prompt.path);
+          }
+        });
+        
+        const results = await (adapter as any).batchDeletePrompts(promptPaths, true);
+        
+        // 🚀 优化：乐观更新 - 先更新 UI，后台刷新
+        // 立即从内存中移除已删除的提示词
+        selectedIds.forEach(id => {
+          dispatch({ type: 'DELETE_PROMPT', payload: id });
+        });
+        
+        // 后台刷新 vault（确保与磁盘同步）
+        refreshVault().catch(err => console.error('Background vault refresh failed:', err));
+        
+        const successCount = results.success.length;
+        const failCount = results.failed.length;
+        
+        // 根据结果显示不同的提示
+        if (failCount === 0) {
+          showToast(`✅ 已永久删除 ${successCount} 个提示词`, 'success');
+        } else if (successCount === 0) {
+          showToast("❌ 批量删除失败", 'error');
+        } else {
+          showToast(`⚠️ 已删除 ${successCount} 个，${failCount} 个失败`, 'warning');
+        }
+      } else {
+        // 回退到逐个删除（捕获单个删除失败）
+        let successCount = 0;
+        let failCount = 0;
+        
+        const deletePromises = Array.from(selectedIds).map(async (id) => {
+          try {
+            const prompt = state.fileSystem?.allPrompts.get(id);
+            if (prompt) {
+              await adapter.deletePrompt(prompt.path, true);
+              successCount++;
+            }
+          } catch (error) {
+            // 单个删除失败不抛出错误，继续删除其他项
+            failCount++;
+          }
+        });
+        
+        await Promise.all(deletePromises);
+        
+        // 🚀 优化：乐观更新
+        selectedIds.forEach(id => {
+          dispatch({ type: 'DELETE_PROMPT', payload: id });
+        });
+        
+        // 后台刷新
+        refreshVault().catch(err => console.error('Background vault refresh failed:', err));
+        
+        // 根据结果显示不同的提示
+        if (failCount === 0) {
+          showToast(`✅ 已永久删除 ${successCount} 个提示词`, 'success');
+        } else if (successCount === 0) {
+          showToast("❌ 批量删除失败", 'error');
+        } else {
+          showToast(`⚠️ 已删除 ${successCount} 个，${failCount} 个失败`, 'warning');
+        }
+      }
+      
+      // 清空选择
+      setSelectedIds(new Set());
+      setBatchSelectMode(false);
+    } catch (error) {
+      showToast("❌ 批量删除失败", 'error');
+      // 即使失败也刷新，确保状态同步
+      await refreshVault();
+    } finally {
+      // 清除删除动画状态
+      setDeletingIds(prev => {
+        const next = new Set(prev);
+        selectedIds.forEach(id => next.delete(id));
+        return next;
+      });
+    }
+  };
+  
+  // 退出批量选择模式时清空选择
+  useEffect(() => {
+    if (!batchSelectMode) {
+      setSelectedIds(new Set());
+      setIsDragging(false);
+      setDragStartId(null);
+    }
+  }, [batchSelectMode]);
+  
+  // 监听全局 mouseup 事件，结束拖拽选择
+  useEffect(() => {
+    const handleGlobalMouseUp = () => {
+      if (isDragging) {
+        handleDragEnd();
+      }
+    };
+    
+    document.addEventListener('mouseup', handleGlobalMouseUp);
+    return () => document.removeEventListener('mouseup', handleGlobalMouseUp);
+  }, [isDragging]);
+  
+  // 监听全局 mousemove 事件，处理自动滚动
+  useEffect(() => {
+    if (isDragging && batchSelectMode) {
+      document.addEventListener('mousemove', handleMouseMove);
+      return () => {
+        document.removeEventListener('mousemove', handleMouseMove);
+        // 清理自动滚动定时器
+        if (autoScrollIntervalRef.current) {
+          window.clearInterval(autoScrollIntervalRef.current);
+          autoScrollIntervalRef.current = null;
+        }
+      };
+    }
+  }, [isDragging, batchSelectMode]);
 
   const handleAddPrompt = async () => {
     if (!newPrompt.title || !newPrompt.content) {
@@ -1132,13 +1809,34 @@ export function PromptList() {
         return out;
       };
 
-      // 准备标签(分类标签 + 用户标签)
+      // 准备标签(分类标签 + 用户标签 + 任务智能标签)
       const userTags = newPrompt.tags ? newPrompt.tags.split(',').map(t => t.trim()).filter(t => t) : [];
-      const rawTags = [...(newPrompt.category ? [newPrompt.category] : []), ...userTags];
+      const taskTags: string[] = [];
+      
+      // 为任务生成智能标签
+      if (newPrompt.type === 'TASK') {
+        taskTags.push('任务');
+        if (newPrompt.recurrence?.enabled) {
+          // 重复任务标签
+          const recurrenceTag = generateRecurrenceTag(newPrompt.recurrence);
+          if (recurrenceTag) taskTags.push(recurrenceTag);
+        } else if (newPrompt.scheduledTime) {
+          // 一次性任务标签
+          const timeTag = generateScheduledTimeTag(newPrompt.scheduledTime);
+          if (timeTag) taskTags.push(timeTag);
+        }
+      }
+      
+      const rawTags = [...(newPrompt.category ? [newPrompt.category] : []), ...taskTags, ...userTags];
       const allTags = dedupeTags(rawTags);
 
-      // 创建提示词并立即更新内容和标签
-      const created = await createPrompt(categoryPath, newPrompt.title);
+      // 创建提示词时直接传递 type 和 scheduled_time
+      const created = await createPrompt(categoryPath, newPrompt.title, {
+        type: newPrompt.type,
+        scheduled_time: newPrompt.type === 'TASK' && !newPrompt.recurrence?.enabled && newPrompt.scheduledTime 
+          ? new Date(newPrompt.scheduledTime).toISOString() 
+          : undefined,
+      });
       
       const updated = {
         ...created,
@@ -1148,11 +1846,12 @@ export function PromptList() {
           tags: allTags,
           category: newPrompt.category,
           category_path: categoryPath,
+          recurrence: newPrompt.type === 'TASK' && newPrompt.recurrence?.enabled ? newPrompt.recurrence : undefined,
         }
       };
       await savePrompt(updated);
 
-      setNewPrompt({ title: '', content: '', category: '', tags: '' });
+      setNewPrompt({ title: '', content: '', category: '', tags: '', type: 'NOTE', scheduledTime: '', recurrence: undefined });
       clearNewPromptDraft();
       // 创建成功：直接关闭，不走 persist（否则可能把旧值误写回草稿）
       setNewPromptOverlayOpen(false);
@@ -1169,6 +1868,15 @@ export function PromptList() {
 
   return (
     <div className="flex-1 flex flex-col h-full overflow-hidden relative bg-transparent">
+      {/* Chrono Alert */}
+      {alertTask && (
+        <ChronoAlert
+          task={alertTask}
+          onFocus={handleAlertFocus}
+          onDismiss={handleAlertDismiss}
+        />
+      )}
+      
       {/* Top Navigation Bar */}
       <div 
         className="h-16 flex items-center justify-between px-6 border-b border-border flex-shrink-0 bg-background/50 backdrop-blur-md z-10 sticky top-0"
@@ -1269,10 +1977,15 @@ export function PromptList() {
           if (!target.closest('[data-card-wrapper]')) {
             setFocusedIndex(-1);
             setIsKeyboardNavigation(false);
+            // 🔥 点击空白处退出 Focus Mode
+            if (focusModeActive) {
+              exitFocusMode();
+            }
           }
         }}
       >
       <ElasticScroll
+        ref={scrollContainerRef}
         className="h-full bg-background/30"
         onContextMenu={(e) => {
           e.preventDefault();
@@ -1288,18 +2001,139 @@ export function PromptList() {
           <div className="flex items-center justify-between mb-6">
             <div className="flex items-center gap-2 text-sm text-muted-foreground">
               <span className="font-medium text-foreground">{prompts.length}</span> 个项目
+              {selectedCategory === 'trash' && batchSelectMode && (
+                <span className="text-primary">
+                  · 已选择 {selectedIds.size} 个
+                </span>
+              )}
             </div>
-            <Button
-              onClick={() => openNewPrompt()}
-              className="btn-create px-3 py-2 rounded-lg text-sm font-medium flex items-center gap-1.5 transition-colors shadow-sm"
-              id="new-prompt-button"
-            >
-              <Plus size={16} /> 新建
-            </Button>
+            <div className="flex items-center gap-2">
+              {/* 回收站批量操作按钮 */}
+              {selectedCategory === 'trash' && (
+                <>
+                  {!batchSelectMode ? (
+                    <Button
+                      onClick={() => setBatchSelectMode(true)}
+                      className="px-3 py-2 rounded-lg text-sm font-medium flex items-center gap-1.5 transition-colors shadow-sm bg-white dark:bg-zinc-800 hover:bg-gray-50 dark:hover:bg-zinc-700 text-gray-700 dark:text-gray-300 border border-gray-200 dark:border-zinc-700"
+                    >
+                      <Square size={16} /> 批量选择
+                    </Button>
+                  ) : (
+                    <>
+                      <Button
+                        onClick={selectAll}
+                        className="px-3 py-2 rounded-lg text-sm font-medium flex items-center gap-1.5 transition-colors shadow-sm bg-white dark:bg-zinc-800 hover:bg-gray-50 dark:hover:bg-zinc-700 text-gray-700 dark:text-gray-300 border border-gray-200 dark:border-zinc-700"
+                      >
+                        全选
+                      </Button>
+                      <Button
+                        onClick={deselectAll}
+                        className="px-3 py-2 rounded-lg text-sm font-medium flex items-center gap-1.5 transition-colors shadow-sm bg-white dark:bg-zinc-800 hover:bg-gray-50 dark:hover:bg-zinc-700 text-gray-700 dark:text-gray-300 border border-gray-200 dark:border-zinc-700"
+                      >
+                        取消选择
+                      </Button>
+                      <Button
+                        onClick={handleBatchDelete}
+                        disabled={selectedIds.size === 0}
+                        className="px-3 py-2 rounded-lg text-sm font-medium flex items-center gap-1.5 transition-colors shadow-sm bg-red-500 hover:bg-red-600 text-white border border-red-600 disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        <Trash2 size={16} /> 永久删除 ({selectedIds.size})
+                      </Button>
+                      <Button
+                        onClick={() => setBatchSelectMode(false)}
+                        className="px-3 py-2 rounded-lg text-sm font-medium flex items-center gap-1.5 transition-colors shadow-sm bg-white dark:bg-zinc-800 hover:bg-gray-50 dark:hover:bg-zinc-700 text-gray-700 dark:text-gray-300 border border-gray-200 dark:border-zinc-700"
+                      >
+                        <X size={16} /> 退出
+                      </Button>
+                    </>
+                  )}
+                </>
+              )}
+              
+              {/* 普通视图按钮 */}
+              {selectedCategory !== 'trash' && (
+                <>
+                  {!exportSelectMode ? (
+                    <>
+                      <Button
+                        id="import-button"
+                        onClick={() => {
+                          setImportDialogMounted(true);
+                          setShowImportDialog(true);
+                        }}
+                        className="px-3 py-2 rounded-lg text-sm font-medium flex items-center gap-1.5 transition-colors shadow-sm bg-white dark:bg-zinc-800 hover:bg-gray-50 dark:hover:bg-zinc-700 text-gray-700 dark:text-gray-300 border border-gray-200 dark:border-zinc-700"
+                      >
+                        <Upload size={16} /> 导入
+                      </Button>
+                      <Button
+                        id="export-button"
+                        onClick={() => {
+                          setExportSelectMode(true);
+                          setExportSelectedIds(new Set());
+                        }}
+                        className="px-3 py-2 rounded-lg text-sm font-medium flex items-center gap-1.5 transition-colors shadow-sm bg-white dark:bg-zinc-800 hover:bg-gray-50 dark:hover:bg-zinc-700 text-gray-700 dark:text-gray-300 border border-gray-200 dark:border-zinc-700"
+                      >
+                        <Upload size={16} className="rotate-180" /> 导出
+                      </Button>
+                      <Button
+                        onClick={() => openNewPrompt()}
+                        className="btn-create px-3 py-2 rounded-lg text-sm font-medium flex items-center gap-1.5 transition-colors shadow-sm"
+                        id="new-prompt-button"
+                      >
+                        <Plus size={16} /> 新建
+                      </Button>
+                    </>
+                  ) : (
+                    <>
+                      <Button
+                        onClick={selectAllForExport}
+                        className="px-3 py-2 rounded-lg text-sm font-medium flex items-center gap-1.5 transition-colors shadow-sm bg-white dark:bg-zinc-800 hover:bg-gray-50 dark:hover:bg-zinc-700 text-gray-700 dark:text-gray-300 border border-gray-200 dark:border-zinc-700"
+                      >
+                        全选
+                      </Button>
+                      <Button
+                        onClick={deselectAllForExport}
+                        className="px-3 py-2 rounded-lg text-sm font-medium flex items-center gap-1.5 transition-colors shadow-sm bg-white dark:bg-zinc-800 hover:bg-gray-50 dark:hover:bg-zinc-700 text-gray-700 dark:text-gray-300 border border-gray-200 dark:border-zinc-700"
+                      >
+                        取消选择
+                      </Button>
+                      <Button
+                        onClick={handleExportSelected}
+                        disabled={exportSelectedIds.size === 0}
+                        className="px-3 py-2 rounded-lg text-sm font-medium flex items-center gap-1.5 transition-colors shadow-sm bg-blue-500 hover:bg-blue-600 text-white border border-blue-600 disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        <Upload size={16} className="rotate-180" /> 导出 ({exportSelectedIds.size})
+                      </Button>
+                      <Button
+                        onClick={() => {
+                          setExportSelectMode(false);
+                          setExportSelectedIds(new Set());
+                        }}
+                        className="px-3 py-2 rounded-lg text-sm font-medium flex items-center gap-1.5 transition-colors shadow-sm bg-white dark:bg-zinc-800 hover:bg-gray-50 dark:hover:bg-zinc-700 text-gray-700 dark:text-gray-300 border border-gray-200 dark:border-zinc-700"
+                      >
+                        <X size={16} /> 退出
+                      </Button>
+                    </>
+                  )}
+                </>
+              )}
+            </div>
           </div>
 
+          {/* Focus Mode 背景覆盖层 - 点击退出焦点模式 */}
+          {focusModeActive && (
+            <div 
+              className="fixed inset-0 z-40 cursor-pointer"
+              onClick={(e) => {
+                e.stopPropagation();
+                exitFocusMode();
+              }}
+              style={{ background: 'transparent' }}
+            />
+          )}
+
           {/* Cards Grid */}
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          <div className={`grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 ${focusModeActive ? 'focus-mode-active' : ''}`}>
             {prompts.map((prompt, index) => {
               const isInTrash = selectedCategory === 'trash';
               const trashItemName = isInTrash ? getTrashItemName(prompt.path) : null;
@@ -1308,10 +2142,15 @@ export function PromptList() {
               const isFocused = index === focusedIndex;
               // 🔥 只在键盘导航时显示选中样式
               const showFocusRing = isFocused && isKeyboardNavigation;
+              const isCardFocused = focusModeActive && focusedCardId === prompt.meta.id;
+              
+              const isTask = prompt.meta.type === 'TASK';
+              const isSelected = selectedIds.has(prompt.meta.id);
+              const isExportSelected = exportSelectedIds.has(prompt.meta.id);
               
               return (
               <div
-                key={prompt.meta.id}
+                key={`${prompt.meta.id}-${prompt.meta.is_pinned}-${prompt.meta.updated_at}`}
                 ref={(el) => (cardRefs.current[index] = el)}
                 tabIndex={-1}
                 data-card-wrapper="true"
@@ -1325,22 +2164,116 @@ export function PromptList() {
                   setIsKeyboardNavigation(false);
                   setFocusedIndex(-1);
                 }}
-                className={`outline-none transition-all duration-200 ${showFocusRing ? 'ring-2 ring-primary rounded-xl shadow-lg' : ''}`}
+                className={`outline-none transition-all duration-200 ${showFocusRing ? 'ring-2 ring-primary rounded-xl shadow-lg' : ''} ${isSelected ? 'ring-2 ring-primary rounded-xl' : ''} ${isExportSelected ? 'ring-2 ring-blue-500 rounded-xl' : ''}`}
               >
               <SpotlightCard
-                onClick={() => {
-                  if (!isInTrash) {
+                onClick={(e) => {
+                  // 如果是拖拽选择，不触发点击事件
+                  if (isDragging) {
+                    e.preventDefault();
+                    return;
+                  }
+                  
+                  // 导出选择模式下，点击卡片切换选中状态
+                  if (exportSelectMode && !isInTrash) {
+                    toggleExportSelect(prompt.meta.id);
+                  }
+                  // 批量选择模式下，点击卡片切换选中状态
+                  else if (batchSelectMode && isInTrash) {
+                    toggleBatchSelect(prompt.meta.id);
+                  } else if (!isInTrash) {
                     handleCardClick(prompt.meta.id);
                   }
                 }}
-                className={`p-5 flex flex-col h-64 relative overflow-hidden ${isInTrash ? 'cursor-default opacity-75' : 'cursor-pointer'}`}
+                className={`p-5 flex flex-col h-64 relative overflow-hidden simple-card ${isCardFocused ? 'card-focused' : ''} ${isInTrash && !batchSelectMode ? 'cursor-default opacity-75' : 'cursor-pointer'} ${isTask ? 'task-card border-rose-500/30' : ''} ${isDragging ? 'select-none' : ''}`}
               >
-                <div id={`prompt-card-${prompt.meta.id}`} className="w-full h-full flex flex-col" style={isDeleting ? { opacity: 0 } : undefined}>
+                {/* 任务卡片扫描线效果 */}
+                {isTask && (
+                  <div className="absolute inset-0 overflow-hidden pointer-events-none">
+                    <div className="scan-line" />
+                  </div>
+                )}
+                
+                {/* 批量选择复选框 */}
+                {batchSelectMode && isInTrash && (
+                  <div className="absolute top-3 left-3 z-20">
+                    <div
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        toggleBatchSelect(prompt.meta.id);
+                      }}
+                      className={`w-5 h-5 rounded border-2 flex items-center justify-center cursor-pointer transition-all ${
+                        isSelected
+                          ? 'bg-primary border-primary'
+                          : 'bg-background border-border hover:border-primary'
+                      }`}
+                    >
+                      {isSelected && (
+                        <svg
+                          className="w-3 h-3 text-primary-foreground"
+                          fill="none"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth="2"
+                          viewBox="0 0 24 24"
+                          stroke="currentColor"
+                        >
+                          <path d="M5 13l4 4L19 7"></path>
+                        </svg>
+                      )}
+                    </div>
+                  </div>
+                )}
+                
+                {/* 任务卡片心跳指示点 */}
+                {isTask && prompt.meta.scheduled_time && (
+                  (() => {
+                    const isExpiredOrUrgent = new Date(prompt.meta.scheduled_time).getTime() - Date.now() < 3600000;
+                    return isExpiredOrUrgent ? (
+                      <div className="absolute top-3 right-3 z-10">
+                        <div className="relative">
+                          <div className="absolute inset-0 bg-rose-500 rounded-full animate-ping opacity-75" />
+                          <div className="relative w-2.5 h-2.5 bg-rose-500 rounded-full pulse-red" />
+                        </div>
+                      </div>
+                    ) : null;
+                  })()
+                )}
+                
+                <div 
+                  id={`prompt-card-${prompt.meta.id}`} 
+                  className="w-full h-full flex flex-col" 
+                  style={isDeleting ? { opacity: 0 } : undefined}
+                  onMouseDown={(e) => {
+                    // 批量选择模式下，按住鼠标开始拖拽选择
+                    if (batchSelectMode && isInTrash) {
+                      e.preventDefault();
+                      handleDragStart(prompt.meta.id);
+                    }
+                  }}
+                  onMouseEnter={() => {
+                    // 拖拽过程中，鼠标进入卡片时选中
+                    if (isDragging && batchSelectMode && isInTrash) {
+                      handleDragEnter(prompt.meta.id);
+                    }
+                  }}
+                >
                 {/* Card Header */}
                 <div className="flex justify-between items-start mb-3">
                   <div className="flex-1 pr-4 min-w-0">
                     <div className="flex items-center gap-2 mb-1.5">
                       {(() => {
+                        // 任务卡片使用时钟图标
+                        if (isTask) {
+                          return (
+                            <div
+                              className="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 bg-gradient-to-br from-rose-500/20 to-red-500/20 border border-rose-500/30"
+                            >
+                              <Clock size={18} className="text-rose-400" />
+                            </div>
+                          );
+                        }
+                        
                         const Icon = getSmartIcon(prompt.meta.title, prompt.meta.tags);
                         const gradient = getIconGradientConfig(prompt.meta.tags);
                         return (
@@ -1357,13 +2290,15 @@ export function PromptList() {
                           </div>
                         );
                       })()}
-                      <h3 className="font-semibold text-foreground truncate group-hover:text-primary transition-colors" title={prompt.meta.title}>{prompt.meta.title}</h3>
+                      <h3 className="font-semibold text-foreground truncate group-hover:text-primary transition-colors" title={getTaskTitleWithRepeatIndicator(prompt)}>{getTaskTitleWithRepeatIndicator(prompt)}</h3>
                       {isInTrash && (
                         <span className="text-[10px] text-muted-foreground border border-border rounded px-1.5 py-0.5 bg-muted/50">
                           {visitCount}/{trashThreshold}
                         </span>
                       )}
                     </div>
+                    {/* 任务卡片不显示标签，普通卡片显示标签 */}
+                    {!isTask && (
                     <div className="flex flex-wrap gap-1.5">
                       {prompt.meta.tags.map(tag => (
                         <span key={tag} className={`text-[10px] px-1.5 py-0.5 rounded border ${getTagColor(tag)}`}>
@@ -1371,39 +2306,72 @@ export function PromptList() {
                         </span>
                       ))}
                     </div>
+                    )}
                   </div>
-                  {!isInTrash && (
-                    <button 
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        if (!prompt.meta.is_favorite) {
-                          const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-                          setBurstingId(prompt.meta.id);
-                          setBurstAnchor({
-                            id: prompt.meta.id,
-                            x: rect.left + rect.width / 2,
-                            y: rect.top + rect.height / 2,
-                          });
-                          if (burstTimerRef.current) {
-                            window.clearTimeout(burstTimerRef.current);
+                  {/* 卡片操作按钮 */}
+                  <div className="flex items-center gap-1">
+                    {/* 置顶按钮 - 所有卡片都显示（回收站除外） */}
+                    {!isInTrash && (
+                      <button 
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          togglePin(prompt.meta.id);
+                        }}
+                        className={`p-1.5 rounded-lg transition-all ${
+                          prompt.meta.is_pinned === true
+                            ? 'bg-blue-500/10 text-blue-500 hover:bg-blue-500/20' 
+                            : 'hover:bg-accent text-muted-foreground hover:text-foreground'
+                        }`}
+                        title={prompt.meta.is_pinned === true ? "取消置顶" : "置顶"}
+                      >
+                        {prompt.meta.is_pinned === true ? (
+                          <Pin
+                            size={14}
+                            fill="currentColor"
+                            strokeWidth={2.5}
+                          />
+                        ) : (
+                          <PinOff
+                            size={14}
+                            strokeWidth={2}
+                          />
+                        )}
+                      </button>
+                    )}
+                    {/* 收藏按钮 - 任务卡片不显示 */}
+                    {!isInTrash && !isTask && (
+                      <button 
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (!prompt.meta.is_favorite) {
+                            const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                            setBurstingId(prompt.meta.id);
+                            setBurstAnchor({
+                              id: prompt.meta.id,
+                              x: rect.left + rect.width / 2,
+                              y: rect.top + rect.height / 2,
+                            });
+                            if (burstTimerRef.current) {
+                              window.clearTimeout(burstTimerRef.current);
+                            }
+                            burstTimerRef.current = window.setTimeout(() => {
+                              setBurstingId((cur) => (cur === prompt.meta.id ? null : cur));
+                              setBurstAnchor((cur) => (cur?.id === prompt.meta.id ? null : cur));
+                              burstTimerRef.current = null;
+                            }, 600);
                           }
-                          burstTimerRef.current = window.setTimeout(() => {
-                            setBurstingId((cur) => (cur === prompt.meta.id ? null : cur));
-                            setBurstAnchor((cur) => (cur?.id === prompt.meta.id ? null : cur));
-                            burstTimerRef.current = null;
-                          }, 600);
-                        }
-                        toggleFavorite(prompt.meta.id);
-                      }}
-                      className={`p-1.5 rounded-lg hover:bg-accent transition-colors ${prompt.meta.is_favorite ? 'text-yellow-400' : 'text-muted-foreground hover:text-foreground'}`}
-                    >
-                      <Star
-                        size={16}
-                        fill={prompt.meta.is_favorite ? "currentColor" : "none"}
-                        className={burstingId === prompt.meta.id ? 'star-bounce' : undefined}
-                      />
-                    </button>
-                  )}
+                          toggleFavorite(prompt.meta.id);
+                        }}
+                        className={`p-1.5 rounded-lg hover:bg-accent transition-colors ${prompt.meta.is_favorite ? 'text-yellow-400' : 'text-muted-foreground hover:text-foreground'}`}
+                      >
+                        <Star
+                          size={16}
+                          fill={prompt.meta.is_favorite ? "currentColor" : "none"}
+                          className={burstingId === prompt.meta.id ? 'star-bounce' : undefined}
+                        />
+                      </button>
+                    )}
+                  </div>
                   {isDeleting && (
                     <DisintegrateOverlay
                       onComplete={() => {
@@ -1412,10 +2380,52 @@ export function PromptList() {
                   )}
                 </div>
 
-                {/* Card Content Preview */}
+                {/* Card Content Preview - 任务卡片不显示内容 */}
+                {!isTask && (
                 <div className="flex-1 bg-muted/40 rounded-lg p-2.5 text-xs text-muted-foreground font-mono overflow-y-auto border-0 dark:border dark:border-border mb-3 whitespace-pre-wrap leading-relaxed no-scrollbar">
                   {prompt.content}
                 </div>
+                )}
+                
+                {/* 任务卡片的计时器/重复标签区域 */}
+                {isTask && (
+                  <div className="flex-1 flex flex-col justify-center">
+                    {/* 重复任务：显示标签 + 倒计时（回收站中停止计时） */}
+                    {prompt.meta.recurrence?.enabled && !isInTrash ? (
+                      <div className="flex flex-col gap-2">
+                        {/* 重复标签 - 简洁文字，无图标 */}
+                        <div className="text-center">
+                          <span className="text-xs font-medium text-rose-400 bg-rose-500/10 px-2 py-0.5 rounded">
+                            {generateRecurrenceTag(prompt.meta.recurrence)} · {prompt.meta.recurrence.time}
+                          </span>
+                        </div>
+                        {/* 使用原有的 ChronoCard 显示倒计时 */}
+                        <ChronoCard
+                          targetDate={getNextTriggerTime(prompt.meta.recurrence)}
+                          startDate={prompt.meta.created_at}
+                        />
+                      </div>
+                    ) : prompt.meta.scheduled_time && !isInTrash ? (
+                      /* 一次性任务：显示倒计时 */
+                      <ChronoCard
+                        targetDate={prompt.meta.scheduled_time}
+                        startDate={prompt.meta.created_at}
+                        isUrgent={new Date(prompt.meta.scheduled_time).getTime() - Date.now() < 3600000}
+                      />
+                    ) : isInTrash ? (
+                      <div className="flex items-center gap-2 px-3 py-1.5 rounded-md bg-muted/60 border border-border text-muted-foreground">
+                        <Clock size={12} />
+                        <span className="text-[10px] font-mono">已停止计时</span>
+                      </div>
+                    ) : (
+                      /* 没有设置时间的任务 */
+                      <div className="flex items-center gap-2 px-3 py-1.5 rounded-md bg-muted/60 border border-border text-muted-foreground">
+                        <Clock size={12} />
+                        <span className="text-[10px] font-mono">未设置时间</span>
+                      </div>
+                    )}
+                  </div>
+                )}
 
                 {/* Card Footer Actions */}
                 <div className="flex items-center justify-between pt-3 border-t border-border">
@@ -1522,10 +2532,11 @@ export function PromptList() {
               </Button>
             </div>
 
-            {/* Content Area */}
+            {/* Content Area - 可滚动 */}
             <div className="flex-1 flex flex-col overflow-hidden">
-              {/* Top Form Section */}
-              <div className="px-6 py-6 space-y-6 border-b border-border bg-background">
+              {/* 可滚动的表单区域 */}
+              <div className="flex-1 overflow-y-auto">
+                <div className="px-6 py-6 space-y-6">
                 {/* 标题 */}
                 <div className="space-y-2">
                   <label className="text-sm font-medium text-foreground">标题</label>
@@ -1538,6 +2549,123 @@ export function PromptList() {
                     autoFocus
                   />
                 </div>
+
+                {/* 类型选择 */}
+                <div className="space-y-2">
+                  <label className="text-sm font-medium text-foreground">类型</label>
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setNewPrompt({...newPrompt, type: 'NOTE', recurrence: undefined, scheduledTime: ''})}
+                      className={`flex-1 px-4 py-2 rounded-lg border transition-all flex items-center justify-center gap-2 ${
+                        newPrompt.type === 'NOTE'
+                          ? 'bg-primary text-primary-foreground border-primary'
+                          : 'bg-input border-border hover:bg-accent text-foreground'
+                      }`}
+                    >
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/>
+                        <polyline points="14,2 14,8 20,8"/>
+                      </svg>
+                      提示词
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setNewPrompt({...newPrompt, type: 'TASK'})}
+                      className={`flex-1 px-4 py-2 rounded-lg border transition-all flex items-center justify-center gap-2 ${
+                        newPrompt.type === 'TASK'
+                          ? 'bg-rose-500 text-white border-rose-500'
+                          : 'bg-input border-border hover:bg-accent text-foreground'
+                      }`}
+                    >
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <circle cx="12" cy="12" r="10"/>
+                        <polyline points="12,6 12,12 16,14"/>
+                      </svg>
+                      任务
+                    </button>
+                  </div>
+                </div>
+
+                {/* 任务模式选择 - 一次性任务 vs 重复任务 */}
+                {newPrompt.type === 'TASK' && (
+                  <div className="space-y-4">
+                    {/* 模式切换 */}
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium text-foreground">任务模式</label>
+                      <div className="flex gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setNewPrompt({...newPrompt, recurrence: undefined})}
+                          className={`flex-1 px-4 py-2 rounded-lg border transition-all flex items-center justify-center gap-2 ${
+                            !newPrompt.recurrence?.enabled
+                              ? 'bg-rose-500 text-white border-rose-500'
+                              : 'bg-input border-border hover:bg-accent text-foreground'
+                          }`}
+                        >
+                          <Clock size={16} />
+                          一次性任务
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setNewPrompt({
+                            ...newPrompt, 
+                            scheduledTime: '',
+                            recurrence: { type: 'daily', time: '09:00', enabled: true }
+                          })}
+                          className={`flex-1 px-4 py-2 rounded-lg border transition-all flex items-center justify-center gap-2 ${
+                            newPrompt.recurrence?.enabled
+                              ? 'bg-rose-500 text-white border-rose-500'
+                              : 'bg-input border-border hover:bg-accent text-foreground'
+                          }`}
+                        >
+                          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M17 2.1l4 4-4 4"/>
+                            <path d="M3 12.2v-2a4 4 0 0 1 4-4h12.8M7 21.9l-4-4 4-4"/>
+                            <path d="M21 11.8v2a4 4 0 0 1-4 4H4.2"/>
+                          </svg>
+                          重复任务
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* 一次性任务：计划时间 */}
+                    {!newPrompt.recurrence?.enabled && (
+                      <div className="space-y-2">
+                        <label className="text-sm font-medium text-foreground">截止时间</label>
+                        <div 
+                          className="flex items-center gap-3 w-full px-4 py-3 bg-input border border-border rounded-lg hover:bg-accent/50 hover:border-primary/30 focus-within:ring-2 focus-within:ring-primary/20 focus-within:border-primary/50 text-foreground transition-all cursor-pointer"
+                          onClick={() => {
+                            const input = document.getElementById('new-task-datetime') as HTMLInputElement;
+                            input?.showPicker?.();
+                          }}
+                        >
+                          <Clock size={18} className="text-rose-400 flex-shrink-0" />
+                          <input
+                            id="new-task-datetime"
+                            type="datetime-local"
+                            className="flex-1 bg-transparent border-none outline-none text-foreground pointer-events-none"
+                            value={newPrompt.scheduledTime}
+                            onChange={(e) => setNewPrompt({...newPrompt, scheduledTime: e.target.value})}
+                            tabIndex={-1}
+                          />
+                        </div>
+                        <p className="text-xs text-muted-foreground">设置任务的截止日期，到期后会收到提醒</p>
+                      </div>
+                    )}
+
+                    {/* 重复任务：重复配置 */}
+                    {newPrompt.recurrence?.enabled && (
+                      <div className="space-y-2">
+                        <RecurrenceSelector
+                          value={newPrompt.recurrence}
+                          onChange={(config) => setNewPrompt({...newPrompt, recurrence: config, scheduledTime: ''})}
+                        />
+                        <p className="text-xs text-muted-foreground">按设定的周期重复提醒，适合日常习惯或定期任务</p>
+                      </div>
+                    )}
+                  </div>
+                )}
 
                 {/* 分类位置 */}
                 <div className="space-y-2">
@@ -1738,51 +2866,48 @@ export function PromptList() {
                     )}
                   </div>
                 </div>
-              </div>
 
-              {/* Content Editor */}
-              <div className="flex-1 flex flex-col overflow-hidden">
-                <div className="flex-1 p-6">
+                {/* 内容编辑区域 */}
+                <div className="space-y-2">
+                  <label className="text-sm font-medium text-foreground">内容</label>
                   <textarea 
-                    className="w-full h-full resize-none focus:outline-none font-mono text-sm leading-relaxed text-foreground placeholder:text-muted-foreground bg-transparent"
+                    className="w-full min-h-[120px] resize-none focus:outline-none font-mono text-sm leading-relaxed text-foreground placeholder:text-muted-foreground bg-input border border-border rounded-lg p-4"
                     placeholder="输入提示词详细内容..."
                     value={newPrompt.content}
                     onChange={(e) => setNewPrompt({...newPrompt, content: e.target.value})}
                   ></textarea>
                 </div>
+
+                {/* 标签 */}
+                <div className="space-y-2">
+                  <label className="text-sm font-medium text-foreground">标签</label>
+                  <input 
+                    type="text" 
+                    className="w-full bg-input px-4 py-3 rounded-lg border border-border focus:outline-none focus:ring-2 focus:ring-primary/20 text-foreground placeholder:text-muted-foreground text-sm"
+                    placeholder="python, react... (用逗号分隔)"
+                    value={newPrompt.tags}
+                    onChange={(e) => setNewPrompt({...newPrompt, tags: e.target.value})}
+                  />
+                </div>
+                </div>
               </div>
 
-              {/* Bottom Actions */}
-              <div className="px-6 py-4 border-t border-border bg-background flex items-center justify-between">
-                <div className="flex items-center gap-4">
-                  <div className="flex items-center gap-2">
-                    <label className="text-sm text-muted-foreground">标签:</label>
-                    <input 
-                      type="text" 
-                      className="bg-input px-3 py-1.5 rounded border border-border focus:outline-none focus:ring-1 focus:ring-primary/20 text-foreground placeholder:text-muted-foreground text-sm w-48"
-                      placeholder="python, react..."
-                      value={newPrompt.tags}
-                      onChange={(e) => setNewPrompt({...newPrompt, tags: e.target.value})}
-                    />
-                  </div>
-                </div>
-                
-                <div className="flex items-center gap-3">
-                  <Button
-                    onClick={requestCloseNewPrompt}
-                    variant="ghost"
-                    className="text-muted-foreground hover:bg-accent"
-                  >
-                    取消
-                  </Button>
-                  <Button
-                    onClick={handleAddPrompt}
-                    className="px-6 py-2 font-medium"
-                    disabled={!newPrompt.title.trim()}
-                  >
-                    创建
-                  </Button>
-                </div>
+              {/* Bottom Actions - 固定在底部 */}
+              <div className="px-6 py-4 border-t border-border bg-background flex items-center justify-end gap-3 flex-shrink-0">
+                <Button
+                  onClick={requestCloseNewPrompt}
+                  variant="ghost"
+                  className="text-muted-foreground hover:bg-accent"
+                >
+                  取消
+                </Button>
+                <Button
+                  onClick={handleAddPrompt}
+                  className="px-6 py-2 font-medium"
+                  disabled={!newPrompt.title.trim()}
+                >
+                  创建
+                </Button>
               </div>
             </div>
           </div>
@@ -1848,6 +2973,46 @@ export function PromptList() {
           ))}
         </div>,
         document.body
+      )}
+
+      {/* Import Dialog */}
+      {importDialogMounted && (
+        <ImportPromptsDialog
+          isOpen={showImportDialog}
+          originId="import-button"
+          onClose={() => setShowImportDialog(false)}
+          onClosed={() => {
+            setShowImportDialog(false);
+            setImportDialogMounted(false);
+          }}
+          defaultCategoryPath={
+            selectedCategory !== 'all' && 
+            selectedCategory !== 'favorites' && 
+            selectedCategory !== 'trash' && 
+            selectedCategory !== null 
+              ? selectedCategory 
+              : undefined
+          }
+        />
+      )}
+
+      {/* Export Dialog */}
+      {showExportDialog && (
+        <ExportPromptsDialog
+          isOpen={showExportDialog}
+          originId="export-button"
+          onClose={() => {
+            setShowExportDialog(false);
+            setExportConfig({});
+          }}
+          onClosed={() => {
+            setShowExportDialog(false);
+            setExportConfig({});
+          }}
+          preSelectedIds={exportConfig.preSelectedIds}
+          categoryPath={exportConfig.categoryPath}
+          preserveStructure={exportConfig.preserveStructure}
+        />
       )}
     </div>
   );

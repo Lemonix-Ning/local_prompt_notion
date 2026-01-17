@@ -52,23 +52,42 @@ async function movePrompt(promptPath, newCategoryPath, vaultRoot) {
 
 /**
  * 标题转 slug
+ * 支持中文、英文、数字
+ * 注意：不转换大小写，保留原始大小写以支持区分
  */
 function titleToSlug(title) {
   return title
-    .toLowerCase()
-    .replace(/[^a-z0-9\s-]/g, '')
-    .replace(/\s+/g, '_')
-    .replace(/-+/g, '_')
-    .substring(0, 50);
+    .trim()
+    // 保留中文、英文、数字、空格、连字符
+    .replace(/[^\u4e00-\u9fa5a-zA-Z0-9\s-]/g, '')
+    // 空格和连字符替换为下划线
+    .replace(/[\s-]+/g, '_')
+    // 限制长度
+    .substring(0, 100); // 增加到 100 以支持中文标题
 }
 
 /**
  * 验证路径是否在 Vault 内(防止路径遍历攻击)
  */
 function isPathSafe(targetPath, vaultRoot) {
-  const normalizedTarget = path.normalize(targetPath);
-  const normalizedRoot = path.normalize(vaultRoot);
-  return normalizedTarget.startsWith(normalizedRoot);
+  // 使用 path.resolve 获取绝对路径并规范化
+  const normalizedTarget = path.resolve(targetPath);
+  const normalizedRoot = path.resolve(vaultRoot);
+  
+  // 在 Windows 上，路径可能有大小写差异，统一转为小写比较
+  const targetLower = normalizedTarget.toLowerCase();
+  const rootLower = normalizedRoot.toLowerCase();
+  
+  // 检查目标路径是否以根路径开头
+  const isStartsWith = targetLower.startsWith(rootLower);
+  
+  // 额外检查：确保不是根路径的前缀（例如 C:\vault2 不应该匹配 C:\vault）
+  const isSafe = isStartsWith && (
+    targetLower === rootLower || 
+    targetLower.charAt(rootLower.length) === path.sep
+  );
+  
+  return isSafe;
 }
 
 /**
@@ -81,8 +100,8 @@ async function scanDirectory(dirPath, rootPath) {
     const entries = await fs.readdir(dirPath, { withFileTypes: true });
 
     for (const entry of entries) {
-      // 跳过隐藏文件夹 (但不跳过 trash)
-      if (entry.name.startsWith('.')) {
+      // 跳过隐藏文件夹和 trash 目录
+      if (entry.name.startsWith('.') || entry.name === 'trash') {
         continue;
       }
 
@@ -107,7 +126,7 @@ async function scanDirectory(dirPath, rootPath) {
       }
     }
   } catch (error) {
-    console.error(`Error scanning directory ${dirPath}:`, error);
+    // Error scanning directory
   }
 
   return nodes;
@@ -132,13 +151,13 @@ async function loadPromptsInDirectory(dirPath) {
             const prompt = await readPrompt(fullPath);
             prompts.push(prompt);
           } catch (error) {
-            console.error(`Error reading prompt at ${fullPath}:`, error);
+            // Error reading prompt
           }
         }
       }
     }
   } catch (error) {
-    console.error(`Error loading prompts in ${dirPath}:`, error);
+    // Error loading prompts
   }
 
   return prompts;
@@ -160,7 +179,7 @@ async function readPrompt(promptPath) {
   try {
     content = await fs.readFile(contentPath, 'utf-8');
   } catch (error) {
-    console.warn(`Content file not found for ${promptPath}`);
+    // Content file not found
   }
 
   return {
@@ -199,6 +218,7 @@ async function writePrompt(promptPath, data, options = {}) {
  */
 async function createPrompt(categoryPath, promptData) {
   const baseSlug = titleToSlug(promptData.title);
+  
   let slug = baseSlug;
   let promptPath = path.join(categoryPath, slug);
   let counter = 1;
@@ -229,9 +249,22 @@ async function createPrompt(categoryPath, promptData) {
       top_p: 1.0,
     },
     is_favorite: promptData.is_favorite || false,
+    is_pinned: promptData.is_pinned || false,
     category: promptData.category || categoryName,
-    category_path: promptData.category_path || categoryPath,
+    category_path: categoryPath,
+    type: promptData.type || 'NOTE',
   };
+  
+  // 任务相关字段（只在提供时才添加）
+  if (promptData.scheduled_time) {
+    meta.scheduled_time = promptData.scheduled_time;
+  }
+  if (promptData.recurrence) {
+    meta.recurrence = promptData.recurrence;
+  }
+  if (promptData.last_notified) {
+    meta.last_notified = promptData.last_notified;
+  }
 
   const data = {
     meta,
@@ -260,21 +293,41 @@ async function updatePrompt(promptPath, updates) {
   if (updates.tags !== undefined) existing.meta.tags = updates.tags;
   if (updates.model_config !== undefined) existing.meta.model_config = updates.model_config;
   if (updates.is_favorite !== undefined) existing.meta.is_favorite = updates.is_favorite;
+  if (updates.is_pinned !== undefined) existing.meta.is_pinned = updates.is_pinned;
   if (updates.author !== undefined) existing.meta.author = updates.author;
+  if (updates.type !== undefined) existing.meta.type = updates.type;
+  
+  // 🔥 scheduled_time 和 recurrence 需要支持清除（传 null 表示删除）
+  if ('scheduled_time' in updates) {
+    if (updates.scheduled_time === null || updates.scheduled_time === undefined) {
+      delete existing.meta.scheduled_time;
+    } else {
+      existing.meta.scheduled_time = updates.scheduled_time;
+    }
+  }
+  if ('recurrence' in updates) {
+    if (updates.recurrence === null || updates.recurrence === undefined) {
+      delete existing.meta.recurrence;
+    } else {
+      existing.meta.recurrence = updates.recurrence;
+    }
+  }
+  if (updates.last_notified !== undefined) existing.meta.last_notified = updates.last_notified;
 
   // 更新内容
   if (updates.content !== undefined) existing.content = updates.content;
 
   // 写入
   const changedFavorite = beforeMeta.is_favorite !== existing.meta.is_favorite;
+  const changedPinned = beforeMeta.is_pinned !== existing.meta.is_pinned;
   const changedTitle = beforeMeta.title !== existing.meta.title;
   const changedAuthor = (beforeMeta.author || '') !== (existing.meta.author || '');
   const changedTags = JSON.stringify(beforeMeta.tags || []) !== JSON.stringify(existing.meta.tags || []);
   const changedModel = JSON.stringify(beforeMeta.model_config || {}) !== JSON.stringify(existing.meta.model_config || {});
   const changedContent = (beforeContent || '') !== (existing.content || '');
 
-  const onlyFavoriteChanged = changedFavorite && !changedTitle && !changedAuthor && !changedTags && !changedModel && !changedContent;
-  await writePrompt(promptPath, existing, { touchUpdatedAt: !onlyFavoriteChanged });
+  const onlyFavoriteOrPinnedChanged = (changedFavorite || changedPinned) && !changedTitle && !changedAuthor && !changedTags && !changedModel && !changedContent;
+  await writePrompt(promptPath, existing, { touchUpdatedAt: !onlyFavoriteOrPinnedChanged });
 
   return existing;
 }
@@ -294,13 +347,31 @@ async function deletePrompt(promptPath, vaultRoot) {
     meta.original_path = promptPath;
     await fs.writeFile(metaPath, JSON.stringify(meta, null, 2), 'utf-8');
   } catch (error) {
-    console.error('保存原始路径失败:', error);
+    // Failed to save original path
   }
 
   const promptName = path.basename(promptPath);
   const targetPath = path.join(trashPath, `${promptName}_${Date.now()}`);
 
-  await fs.rename(promptPath, targetPath);
+  try {
+    // 尝试直接重命名（最快）
+    await fs.rename(promptPath, targetPath);
+  } catch (error) {
+    // 如果重命名失败（Windows 文件锁定），使用 copy+delete 回退
+    if (error.code === 'EPERM' || error.code === 'EBUSY' || error.code === 'EACCES') {
+      try {
+        // 复制到回收站
+        await fs.cp(promptPath, targetPath, { recursive: true });
+        // 删除原文件
+        await fs.rm(promptPath, { recursive: true, force: true });
+      } catch (fallbackError) {
+        // 如果回退也失败，抛出原始错误
+        throw error;
+      }
+    } else {
+      throw error;
+    }
+  }
 }
 
 /**
@@ -308,6 +379,56 @@ async function deletePrompt(promptPath, vaultRoot) {
  */
 async function permanentlyDeletePrompt(promptPath) {
   await fs.rm(promptPath, { recursive: true, force: true });
+}
+
+/**
+ * 清理过期的回收站项目
+ * @param {string} vaultRoot - Vault 根目录
+ * @param {number} maxAgeDays - 最大保留天数，默认 5 天
+ * @returns {Promise<{deletedCount: number, deletedItems: string[]}>}
+ */
+async function cleanupTrash(vaultRoot, maxAgeDays = 5) {
+  const trashPath = path.join(vaultRoot, 'trash');
+  const deletedItems = [];
+  
+  // 检查回收站是否存在
+  if (!await exists(trashPath)) {
+    return { deletedCount: 0, deletedItems: [] };
+  }
+  
+  const maxAgeMs = maxAgeDays * 24 * 60 * 60 * 1000; // 转换为毫秒
+  const now = Date.now();
+  
+  try {
+    const entries = await fs.readdir(trashPath, { withFileTypes: true });
+    
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue;
+      
+      const itemPath = path.join(trashPath, entry.name);
+      
+      // 从文件夹名称中提取时间戳 (格式: name_timestamp)
+      const match = entry.name.match(/_(\d+)$/);
+      if (!match) continue;
+      
+      const timestamp = parseInt(match[1], 10);
+      const age = now - timestamp;
+      
+      // 如果超过最大保留时间，删除
+      if (age > maxAgeMs) {
+        try {
+          await fs.rm(itemPath, { recursive: true, force: true });
+          deletedItems.push(entry.name);
+        } catch (error) {
+          // Failed to delete expired item
+        }
+      }
+    }
+  } catch (error) {
+    // Error scanning trash
+  }
+  
+  return { deletedCount: deletedItems.length, deletedItems };
 }
 
 /**
@@ -322,26 +443,19 @@ async function restorePrompt(promptPath, vaultRoot) {
     const metaContent = await fs.readFile(metaPath, 'utf-8');
     const meta = JSON.parse(metaContent);
     
-    console.log(`[RESTORE] Restoring prompt: ${path.basename(promptPath)}`);
-    console.log(`[RESTORE] Original path: ${meta.original_path}`);
-    console.log(`[RESTORE] Original category: ${meta.original_category}`);
-    
     // 优先使用保存的原始路径，但只有当原始分类仍然存在时
     if (meta.original_path && await exists(path.dirname(meta.original_path))) {
-      console.log(`[RESTORE] Original directory exists, restoring to original location`);
       const trashItemName = path.basename(promptPath);
       const originalName = trashItemName.replace(/_\d+$/, '');
       const originalDir = path.dirname(meta.original_path);
       targetPath = path.join(originalDir, originalName);
     } else if (meta.original_category_path && await exists(meta.original_category_path)) {
       // 如果原始分类路径存在，恢复到那里
-      console.log(`[RESTORE] Original category exists, restoring to: ${meta.original_category_path}`);
       const trashItemName = path.basename(promptPath);
       const originalName = trashItemName.replace(/_\d+$/, '');
       targetPath = path.join(meta.original_category_path, originalName);
     } else {
       // 原始分类不存在，恢复到根目录（这样在"全部"中就能看到）
-      console.log(`[RESTORE] Original category not found, restoring to vault root`);
       const trashItemName = path.basename(promptPath);
       const originalName = trashItemName.replace(/_\d+$/, '');
       targetPath = path.join(vaultRoot, originalName);
@@ -349,8 +463,6 @@ async function restorePrompt(promptPath, vaultRoot) {
       // 更新元数据中的分类信息 - 清空分类，表示在根目录
       meta.category = '';
       meta.category_path = vaultRoot;
-      
-      console.log(`[RESTORE] Will restore to vault root: ${targetPath}`);
     }
     
     // 如果目标路径已存在，添加后缀
@@ -377,10 +489,8 @@ async function restorePrompt(promptPath, vaultRoot) {
     // 移动文件
     await fs.rename(promptPath, finalPath);
     
-    console.log(`[RESTORE] Prompt restored successfully to: ${finalPath}`);
     return finalPath;
   } catch (error) {
-    console.error('[RESTORE] 恢复提示词失败:', error);
     throw error;
   }
 }
@@ -440,7 +550,7 @@ async function safeRemoveDirectory(dirPath, retries = 5) {
           try {
             await fs.unlink(fullPath);
           } catch (unlinkError) {
-            console.log(`[RENAME] Could not unlink ${fullPath}, will retry`);
+            // Could not unlink, will retry
           }
         }
       }
@@ -452,10 +562,8 @@ async function safeRemoveDirectory(dirPath, retries = 5) {
       if (i < retries - 1) {
         // 等待后重试
         const waitTime = 300 * (i + 1);
-        console.log(`[RENAME] Retry deleting ${dirPath}, attempt ${i + 1}/${retries}, waiting ${waitTime}ms`);
         await new Promise(resolve => setTimeout(resolve, waitTime));
       } else {
-        console.error(`[RENAME] Failed to delete ${dirPath} after ${retries} retries:`, error.message);
         throw error;
       }
     }
@@ -485,38 +593,29 @@ async function renameCategory(categoryPath, newName) {
   
   try {
     // 先尝试直接重命名
-    console.log(`[RENAME] Attempting direct rename: ${categoryPath} -> ${newPath}`);
     await fs.rename(categoryPath, newPath);
-    console.log(`[RENAME] Direct rename successful`);
   } catch (error) {
     // 如果失败(通常是 EPERM),使用复制+删除
     if (error.code === 'EPERM' || error.code === 'EBUSY') {
-      console.log(`[RENAME] Direct rename failed (${error.code}), using copy+delete fallback`);
       usedFallback = true;
       
       try {
         // 复制到新位置
-        console.log(`[RENAME] Copying ${categoryPath} to ${newPath}`);
         await copyDirectory(categoryPath, newPath);
-        console.log(`[RENAME] Copy successful`);
         
         // 等待一下,确保所有文件都写入完成
         await new Promise(resolve => setTimeout(resolve, 100));
         
         // 删除原目录
-        console.log(`[RENAME] Deleting original directory ${categoryPath}`);
         await safeRemoveDirectory(categoryPath);
-        console.log(`[RENAME] Delete successful`);
       } catch (fallbackError) {
         // 如果复制+删除失败,尝试回滚
-        console.error('[RENAME] Copy+delete failed:', fallbackError);
         try {
           if (await exists(newPath)) {
-            console.log(`[RENAME] Rolling back - deleting ${newPath}`);
             await safeRemoveDirectory(newPath);
           }
         } catch (rollbackError) {
-          console.error('[RENAME] Rollback failed:', rollbackError);
+          // Rollback failed
         }
         throw new Error('Failed to rename category: ' + fallbackError.message);
       }
@@ -598,7 +697,6 @@ async function moveCategory(categoryPath, targetParentPath, vaultRoot) {
 
   // 🔥🔥🔥 性能优化：跳过元数据更新
   // 元数据将在下次 vault 扫描时自动修正，避免大量 I/O 操作
-  console.log('[MOVE] Skipping metadata normalization for performance - will be corrected on next vault scan');
 
   return { name, path: destPath, usedFallback };
 }
@@ -632,7 +730,7 @@ async function preparePromptsForCategoryDeletion(categoryPath, vaultRoot) {
               meta.original_category_path = categoryPath;
               await fs.writeFile(metaPath, JSON.stringify(meta, null, 2), 'utf-8');
             } catch (error) {
-              console.error(`Error processing prompt at ${fullPath}:`, error);
+              // Error processing prompt
             }
           } else {
             // 这是一个子分类，递归处理
@@ -641,7 +739,7 @@ async function preparePromptsForCategoryDeletion(categoryPath, vaultRoot) {
         }
       }
     } catch (error) {
-      console.error(`Error collecting prompts in ${dirPath}:`, error);
+      // Error collecting prompts
     }
   }
   
@@ -657,7 +755,6 @@ async function deleteCategory(categoryPath, vaultRoot) {
   await fs.mkdir(trashPath, { recursive: true });
 
   // 先处理分类内的提示词，保存原始路径信息
-  console.log(`[DELETE] Preparing prompts for category deletion: ${categoryPath}`);
   await preparePromptsForCategoryDeletion(categoryPath, vaultRoot);
 
   const categoryName = path.basename(categoryPath);
@@ -666,37 +763,28 @@ async function deleteCategory(categoryPath, vaultRoot) {
   let usedFallback = false;
   try {
     // 先尝试直接重命名
-    console.log(`[DELETE] Attempting direct rename: ${categoryPath} -> ${targetPath}`);
     await fs.rename(categoryPath, targetPath);
-    console.log(`[DELETE] Direct rename successful`);
   } catch (error) {
     // 如果失败(通常是 EPERM 或 EBUSY),使用复制+删除
     if (error.code === 'EPERM' || error.code === 'EBUSY') {
-      console.log(`[DELETE] Direct rename failed (${error.code}), using copy+delete fallback`);
       usedFallback = true;
       try {
         // 复制到回收站
-        console.log(`[DELETE] Copying ${categoryPath} to ${targetPath}`);
         await copyDirectory(categoryPath, targetPath);
-        console.log(`[DELETE] Copy successful`);
         
         // 等待一下,确保所有文件都写入完成
         await new Promise(resolve => setTimeout(resolve, 100));
         
         // 删除原目录
-        console.log(`[DELETE] Deleting original directory ${categoryPath}`);
         await safeRemoveDirectory(categoryPath);
-        console.log(`[DELETE] Delete successful`);
       } catch (fallbackError) {
         // 如果复制+删除失败,尝试回滚
-        console.error('[DELETE] Copy+delete failed:', fallbackError);
         try {
           if (await exists(targetPath)) {
-            console.log(`[DELETE] Rolling back - deleting ${targetPath}`);
             await safeRemoveDirectory(targetPath);
           }
         } catch (rollbackError) {
-          console.error('[DELETE] Rollback failed:', rollbackError);
+          // Rollback failed
         }
         throw new Error('Failed to delete category: ' + fallbackError.message);
       }
@@ -705,7 +793,6 @@ async function deleteCategory(categoryPath, vaultRoot) {
     }
   }
 
-  console.log(`[DELETE] Category deletion completed: ${categoryName}`);
   return { name: categoryName, path: targetPath, usedFallback };
 }
 
@@ -803,7 +890,7 @@ async function findPromptPathById(categories, promptId, vaultRoot) {
       }
     }
   } catch (error) {
-    console.error('Error searching root directory prompts:', error);
+    // Error searching root directory prompts
   }
 
   return null;
@@ -839,7 +926,7 @@ async function normalizePromptsCategoryPath(categories, vaultRoot) {
             updated.push({ id: nextMeta.id, path: promptPath });
           }
         } catch (error) {
-          console.error(`Error normalizing prompt at ${promptPath}:`, error.message || error);
+          // Error normalizing prompt
         }
       }
       if (node.children && node.children.length > 0) {
@@ -864,6 +951,7 @@ module.exports = {
   updatePrompt,
   deletePrompt,
   permanentlyDeletePrompt,
+  cleanupTrash,
   restorePrompt,
   movePrompt,
   createCategory,
