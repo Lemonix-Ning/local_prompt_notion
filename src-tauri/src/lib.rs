@@ -77,6 +77,8 @@ pub fn run() {
         let _ = window.set_focus();
       }
     }))
+    // 🔥 通知插件：支持系统级任务提醒
+    .plugin(tauri_plugin_notification::init())
     .invoke_handler(tauri::generate_handler![exit_app])
     .setup(|app| {
       println!("Starting PromptManager setup...");
