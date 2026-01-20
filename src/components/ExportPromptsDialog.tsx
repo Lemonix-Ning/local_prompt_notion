@@ -3,7 +3,7 @@
  * 支持选择提示词、配置导出选项、下载 JSON 文件
  */
 
-import React, { useState, useMemo, useCallback } from 'react';
+import React, { useState, useMemo, useCallback, useEffect } from 'react';
 import { X, Download, FileJson, CheckCircle, Loader, Folder, FolderOpen } from 'lucide-react';
 import { useApp } from '../AppContext';
 import { useToast } from '../contexts/ToastContext';
@@ -19,6 +19,7 @@ interface ExportPromptsDialogProps {
   categoryPath?: string; // 导出指定分类（包含子分类）- 单个分类
   categoryPaths?: string[]; // 导出多个分类（包含子分类）- 多个分类
   preserveStructure?: boolean; // 是否保留分类结构（树形导出）
+  embedded?: boolean;
 }
 
 export const ExportPromptsDialog: React.FC<ExportPromptsDialogProps> = ({
@@ -30,18 +31,54 @@ export const ExportPromptsDialog: React.FC<ExportPromptsDialogProps> = ({
   categoryPath,
   categoryPaths = [],
   preserveStructure = false, // 默认扁平结构
+  embedded = false,
 }) => {
   const { state } = useApp();
   const { showToast } = useToast();
 
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set(preSelectedIds));
-  const [selectedCategories, setSelectedCategories] = useState<Set<string>>(
-    new Set(categoryPaths.length > 0 ? categoryPaths : categoryPath ? [categoryPath] : [])
-  );
-  // 固定包含内容，不再提供选项
-  const includeContent = true;
+  // 🔥 所有 useState 必须在顶层调用
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [selectedCategories, setSelectedCategories] = useState<Set<string>>(new Set());
+  const includeContent = true; // 固定包含内容，不再提供选项
   const [isExporting, setIsExporting] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+
+  // 🔥 添加 mounted 状态和 snapshot，与 DeleteCategoryDialog 保持一致
+  const [mounted, setMounted] = useState(false);
+  const [snapshot, setSnapshot] = useState<{
+    originId: string;
+    preSelectedIds: string[];
+    categoryPath?: string;
+    categoryPaths: string[];
+    preserveStructure: boolean;
+  } | null>(null);
+
+  useEffect(() => {
+    if (isOpen) {
+      setMounted(true);
+      // 🔥 使用当前的 props 值保存快照
+      const currentSnapshot = {
+        originId,
+        preSelectedIds,
+        categoryPath,
+        categoryPaths,
+        preserveStructure,
+      };
+      setSnapshot(currentSnapshot);
+      // 🔥 只在打开时重置一次
+      setSelectedIds(new Set(currentSnapshot.preSelectedIds));
+      setSelectedCategories(new Set(
+        currentSnapshot.categoryPaths.length > 0 
+          ? currentSnapshot.categoryPaths 
+          : currentSnapshot.categoryPath 
+            ? [currentSnapshot.categoryPath] 
+            : []
+      ));
+      setSearchQuery('');
+      setIsExporting(false);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen]); // 🔥 只依赖 isOpen，避免无限循环
 
   // 预选的分类路径（从 Sidebar 右键或选中分类后导出）
   const preSelectedCategoryPaths = useMemo(() => {
@@ -350,15 +387,11 @@ export const ExportPromptsDialog: React.FC<ExportPromptsDialogProps> = ({
     backdropBlur: 8,
   }), []);
 
-  return (
-    <NewPromptOverlay
-      isOpen={isOpen}
-      originId={originId}
-      targetState={targetState}
-      onRequestClose={onClose}
-      onClosed={onClosed}
-    >
-      <div className="h-full flex flex-col bg-white dark:bg-zinc-900 rounded-lg shadow-2xl overflow-hidden">
+  // 🔥 所有 hooks 调用完毕后，检查是否应该渲染
+  if (!mounted || !snapshot) return null;
+
+  const content = (
+    <div className="h-full flex flex-col bg-white dark:bg-zinc-900 rounded-lg shadow-2xl overflow-hidden">
         {/* 头部 */}
         <div className="flex items-center justify-between p-6 border-b border-gray-200 dark:border-zinc-800">
           <div className="flex flex-col gap-1">
@@ -578,6 +611,26 @@ export const ExportPromptsDialog: React.FC<ExportPromptsDialogProps> = ({
           </button>
         </div>
       </div>
+  );
+
+  if (embedded) {
+    if (!isOpen) return null;
+    return content;
+  }
+
+  return (
+    <NewPromptOverlay
+      isOpen={isOpen}
+      originId={snapshot.originId}
+      targetState={targetState}
+      onRequestClose={onClose}
+      onClosed={() => {
+        setMounted(false);
+        setSnapshot(null);
+        onClosed();
+      }}
+    >
+      {content}
     </NewPromptOverlay>
   );
 };

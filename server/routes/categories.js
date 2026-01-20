@@ -17,6 +17,19 @@ const {
 const rawVaultPath = process.env.VAULT_PATH && process.env.VAULT_PATH.trim();
 const VAULT_ROOT = rawVaultPath || path.join(__dirname, '../../vault');
 
+// 🚀 Performance: Get API cache instance for invalidation
+let apiCache = null;
+const getApiCache = () => {
+  if (!apiCache) {
+    try {
+      apiCache = require('./vault').apiCache;
+    } catch (error) {
+      // Cache not available
+    }
+  }
+  return apiCache;
+};
+
 /**
  * GET /api/categories
  * 获取所有分类
@@ -69,6 +82,12 @@ router.put('/move', async (req, res, next) => {
 
     const moved = await moveCategory(categoryPath, targetParentPath, VAULT_ROOT);
 
+    // 🚀 Performance: Invalidate cache after data modification
+    const cache = getApiCache();
+    if (cache) {
+      cache.invalidate('/api/vault/');
+    }
+
     res.json({
       success: true,
       data: moved,
@@ -114,6 +133,12 @@ router.post('/', async (req, res, next) => {
 
     // 创建分类
     const category = await createCategory(actualParentPath, name.trim());
+
+    // 🚀 Performance: Invalidate cache after data modification
+    const cache = getApiCache();
+    if (cache) {
+      cache.invalidate('/api/vault/');
+    }
 
     res.json({
       success: true,
@@ -168,6 +193,12 @@ router.put('/rename', async (req, res, next) => {
     
     await renameCategory(categoryPath, newName.trim());
 
+    // 🚀 Performance: Invalidate cache after data modification
+    const cache = getApiCache();
+    if (cache) {
+      cache.invalidate('/api/vault/');
+    }
+
     res.json({
       success: true,
       message: 'Category renamed successfully',
@@ -216,6 +247,12 @@ router.delete('/', async (req, res, next) => {
     }
 
     await deleteCategory(categoryPath, VAULT_ROOT);
+
+    // 🚀 Performance: Invalidate cache after data modification
+    const cache = getApiCache();
+    if (cache) {
+      cache.invalidate('/api/vault/');
+    }
 
     res.json({
       success: true,

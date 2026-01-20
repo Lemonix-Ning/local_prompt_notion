@@ -1,0 +1,23 @@
+[
+  {
+    "title": "Valid Prompt",
+    "content": "This is a valid prompt",
+    "type": "NOTE"
+  },
+  {
+    "content": "This prompt has no title - should be filtered out"
+  },
+  {
+    "title": 12345,
+    "content": "This prompt has invalid title type - should be filtered out"
+  },
+  {
+    "title": "",
+    "content": "This prompt has empty title - should be filtered out"
+  },
+  {
+    "title": "Another Valid Prompt",
+    "content": "This is another valid prompt",
+    "tags": ["valid"]
+  }
+]

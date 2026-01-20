@@ -9,10 +9,21 @@ use tauri_plugin_shell::ShellExt;
 
 struct BackendProcess(Mutex<Option<CommandChild>>);
 
+fn terminate_backend(app: &tauri::AppHandle) {
+    if let Some(state) = app.try_state::<BackendProcess>() {
+        if let Ok(mut guard) = state.0.lock() {
+            if let Some(child) = guard.take() {
+                let _ = child.kill();
+            }
+        }
+    }
+}
+
 // 🔥 退出应用命令
 #[tauri::command]
 fn exit_app(app: tauri::AppHandle) {
     println!("User requested exit from frontend");
+    terminate_backend(&app);
     app.exit(0);
 }
 
@@ -81,7 +92,15 @@ pub fn run() {
     .plugin(tauri_plugin_notification::init())
     .invoke_handler(tauri::generate_handler![exit_app])
     .setup(|app| {
-      println!("Starting PromptManager setup...");
+      println!("Starting Lumina setup...");
+
+      #[cfg(desktop)]
+      {
+        use tauri_plugin_autostart::MacosLauncher;
+        let _ = app
+          .handle()
+          .plugin(tauri_plugin_autostart::init(MacosLauncher::LaunchAgent, None));
+      }
 
       // Portable default: vault next to the executable (e.g. on a USB drive).
       let vault_root = app
@@ -149,7 +168,7 @@ pub fn run() {
 
       // 创建系统托盘图标
       let _tray = TrayIconBuilder::with_id("main-tray")
-        .tooltip("PromptManager - 提示词管理器")
+        .tooltip("Lumina")
         .icon(app.default_window_icon().unwrap().clone())
         .menu(&menu)
         .on_menu_event(|app, event| {
@@ -162,6 +181,7 @@ pub fn run() {
             }
             "quit" => {
               println!("User requested quit from tray menu");
+              terminate_backend(app);
               app.exit(0);
             }
             _ => {}
@@ -204,17 +224,7 @@ pub fn run() {
       }
       tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit => {
         println!("Application is closing, terminating backend server...");
-        if let Some(state) = app_handle.try_state::<BackendProcess>() {
-          if let Ok(mut guard) = state.0.lock() {
-            if let Some(child) = guard.take() {
-              println!("Killing backend process...");
-              match child.kill() {
-                Ok(_) => println!("Backend process terminated successfully"),
-                Err(e) => eprintln!("Failed to kill backend process: {}", e),
-              }
-            }
-          }
-        }
+        terminate_backend(&app_handle);
       }
       _ => {}
     }

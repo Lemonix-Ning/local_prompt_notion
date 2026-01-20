@@ -254,6 +254,30 @@
   transform: translateZ(20px);
 }
 
+/* GPU acceleration hints for animated elements */
+.animate-empty-pulse,
+.animate-empty-float,
+.animate-empty-bounce-2,
+.animate-empty-bounce-3,
+.pulse-red,
+.star-bounce,
+.toast-enter,
+.animate-shrink,
+.animate-disintegrate,
+.quantum-particle,
+.quantum-shockwave,
+.firework-particle {
+  will-change: transform, opacity;
+}
+
+.scan-line {
+  will-change: transform;
+}
+
+.card-focused {
+  will-change: border-color;
+}
+
 .animate-empty-pulse {
   transform-origin: center;
   animation: empty-pulse-glow 2.6s ease-in-out infinite;
@@ -605,10 +629,10 @@ code {
 
 @keyframes shrink {
   from {
-    width: 100%;
+    transform: scaleX(1);
   }
   to {
-    width: 0%;
+    transform: scaleX(0);
   }
 }
 
@@ -618,6 +642,7 @@ code {
 
 .animate-shrink {
   animation: shrink 3s linear forwards;
+  transform-origin: left center;
 }
 
 /* Notion 风格侧边栏样式 */
@@ -794,6 +819,8 @@ code {
 }
 
 .animate-slide-down {
+  opacity: 0;
+  transform: translate(-50%, -20px);
   animation: slide-down 0.4s cubic-bezier(0.19, 1, 0.22, 1) forwards;
 }
 

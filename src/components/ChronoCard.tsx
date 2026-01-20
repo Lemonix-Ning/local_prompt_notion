@@ -8,6 +8,7 @@
  * - Scanline: CRT 风格的扫描线动画，增加科技感
  */
 
+import { memo } from 'react';
 import { Clock, AlertCircle, Zap } from 'lucide-react';
 import { useCountdown } from '../hooks/useCountdown';
 
@@ -16,10 +17,14 @@ interface ChronoCardProps {
   startDate?: string;
   isUrgent?: boolean;
   compact?: boolean; // 紧凑模式，用于卡片内显示
+  invertProgress?: boolean;
+  recurrence?: { type: 'interval'; intervalMinutes: number }; // 新增：重复配置
 }
 
-export const ChronoCard = ({ targetDate, startDate, isUrgent, compact = false }: ChronoCardProps) => {
-  const countdown = useCountdown(targetDate, startDate);
+const ChronoCardComponent = ({ targetDate, startDate, isUrgent, compact = false, invertProgress = false, recurrence }: ChronoCardProps) => {
+  const countdown = useCountdown(targetDate, startDate, recurrence);
+
+  const displayProgress = invertProgress ? Math.max(0, Math.min(100, 100 - countdown.progress)) : countdown.progress;
 
   // 格式化时间显示
   const formatTime = () => {
@@ -82,7 +87,7 @@ export const ChronoCard = ({ targetDate, startDate, isUrgent, compact = false }:
                   ? 'bg-orange-500'
                   : 'bg-cyan-500'
               }`}
-              style={{ width: `${countdown.progress}%` }}
+              style={{ width: `${displayProgress}%` }}
             />
           </div>
         )}
@@ -188,7 +193,7 @@ export const ChronoCard = ({ targetDate, startDate, isUrgent, compact = false }:
                   : 'bg-gradient-to-r from-cyan-600 via-cyan-500 to-blue-400'
               }`}
               style={{ 
-                width: `${countdown.progress}%`,
+                width: `${displayProgress}%`,
                 boxShadow: `0 0 8px ${statusColor === 'rose' ? 'rgba(244,63,94,0.6)' : statusColor === 'orange' ? 'rgba(249,115,22,0.6)' : 'rgba(34,211,238,0.4)'}`
               }}
             />
@@ -198,3 +203,19 @@ export const ChronoCard = ({ targetDate, startDate, isUrgent, compact = false }:
     </div>
   );
 };
+
+// Memoize ChronoCard to prevent unnecessary re-renders
+// Only re-render when props actually change
+export const ChronoCard = memo(ChronoCardComponent, (prevProps, nextProps) => {
+  return (
+    prevProps.targetDate === nextProps.targetDate &&
+    prevProps.startDate === nextProps.startDate &&
+    prevProps.isUrgent === nextProps.isUrgent &&
+    prevProps.compact === nextProps.compact &&
+    prevProps.invertProgress === nextProps.invertProgress &&
+    prevProps.recurrence?.type === nextProps.recurrence?.type &&
+    prevProps.recurrence?.intervalMinutes === nextProps.recurrence?.intervalMinutes
+  );
+});
+
+ChronoCard.displayName = 'ChronoCard';

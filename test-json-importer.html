@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>JSON Importer Test</title>
+  <style>
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      max-width: 800px;
+      margin: 50px auto;
+      padding: 20px;
+      background: #f5f5f5;
+    }
+    .test-section {
+      background: white;
+      padding: 20px;
+      margin: 20px 0;
+      border-radius: 8px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    h1 { color: #333; }
+    h2 { color: #666; margin-top: 0; }
+    button {
+      background: #4f46e5;
+      color: white;
+      border: none;
+      padding: 10px 20px;
+      border-radius: 6px;
+      cursor: pointer;
+      margin: 5px;
+    }
+    button:hover { background: #4338ca; }
+    .result {
+      margin-top: 15px;
+      padding: 15px;
+      background: #f9fafb;
+      border-radius: 6px;
+      border-left: 4px solid #4f46e5;
+    }
+    .success { border-left-color: #10b981; }
+    .error { border-left-color: #ef4444; }
+    pre {
+      background: #1f2937;
+      color: #f3f4f6;
+      padding: 15px;
+      border-radius: 6px;
+      overflow-x: auto;
+    }
+    input[type="file"] {
+      margin: 10px 0;
+    }
+  </style>
+</head>
+<body>
+  <h1>JSON Importer Test Suite</h1>
+  
+  <div class="test-section">
+    <h2>Test 1: Valid JSON Array with category_path</h2>
+    <p>Tests importing JSON with category_path fields (Requirement 2.1)</p>
+    <button onclick="testValidJsonWithCategories()">Run Test</button>
+    <div id="test1-result"></div>
+  </div>
+
+  <div class="test-section">
+    <h2>Test 2: Valid JSON Array without category_path</h2>
+    <p>Tests importing JSON without category_path, should default to "公共" (Requirement 2.2)</p>
+    <button onclick="testValidJsonWithoutCategories()">Run Test</button>
+    <div id="test2-result"></div>
+  </div>
+
+  <div class="test-section">
+    <h2>Test 3: Single JSON Object</h2>
+    <p>Tests importing a single JSON object (not an array)</p>
+    <button onclick="testSingleJsonObject()">Run Test</button>
+    <div id="test3-result"></div>
+  </div>
+
+  <div class="test-section">
+    <h2>Test 4: Invalid JSON</h2>
+    <p>Tests handling of malformed JSON</p>
+    <button onclick="testInvalidJson()">Run Test</button>
+    <div id="test4-result"></div>
+  </div>
+
+  <div class="test-section">
+    <h2>Test 5: JSON with Invalid Prompts</h2>
+    <p>Tests filtering out prompts without titles</p>
+    <button onclick="testInvalidPrompts()">Run Test</button>
+    <div id="test5-result"></div>
+  </div>
+
+  <div class="test-section">
+    <h2>Test 6: Empty JSON Array</h2>
+    <p>Tests handling of empty array</p>
+    <button onclick="testEmptyArray()">Run Test</button>
+    <div id="test6-result"></div>
+  </div>
+
+  <div class="test-section">
+    <h2>Test 7: File Upload Test</h2>
+    <p>Upload a JSON file to test the importer</p>
+    <input type="file" id="fileInput" accept=".json" />
+    <button onclick="testFileUpload()">Import File</button>
+    <div id="test7-result"></div>
+  </div>
+
+  <script type="module">
+    // Mock API for testing
+    const mockApi = {
+      prompts: {
+        import: async (data) => {
+          console.log('Mock API called with:', data);
+          
+          // Simulate API response
+          return {
+            success: true,
+            data: {
+              total: data.prompts.length,
+              success: data.prompts.length,
+              failed: 0,
+              skipped: 0,
+              details: data.prompts.map((p, i) => ({
+                index: i,
+                title: p.title,
+                status: 'success'
+              }))
+            }
+          };
+        }
+      }
+    };
+
+    // Import the jsonImporter module
+    // Note: This is a simplified version for testing
+    async function importJsonFile(file, api, options = {}) {
+      try {
+        const content = await file.text();
+        
+        let data;
+        try {
+          data = JSON.parse(content);
+        } catch (parseError) {
+          return { 
+            success: false, 
+            error: 'Invalid JSON format' 
+          };
+        }
+        
+        const prompts = Array.isArray(data) ? data : [data];
+        
+        const validPrompts = prompts.filter((p) => {
+          return p && p.title && typeof p.title === 'string';
+        });
+        
+        if (validPrompts.length === 0) {
+          return { 
+            success: false, 
+            error: 'No valid prompts found in JSON file' 
+          };
+        }
+        
+        const hasCategories = validPrompts.some((p) => p.category_path);
+        
+        let categoryPath;
+        if (!hasCategories) {
+          categoryPath = options.defaultCategory || '公共';
+        }
+        
+        const response = await api.prompts.import({
+          prompts: validPrompts,
+          categoryPath,
+          conflictStrategy: options.conflictStrategy || 'rename',
+        });
+        
+        if (response.success && response.data) {
+          return { 
+            success: true, 
+            results: response.data 
+          };
+        } else {
+          return { 
+            success: false, 
+            error: response.error || 'Import failed' 
+          };
+        }
+      } catch (error) {
+        return { 
+          success: false, 
+          error: error instanceof Error ? error.message : 'Unknown error occurred' 
+        };
+      }
+    }
+
+    // Helper to create a File object from JSON data
+    function createJsonFile(data, filename = 'test.json') {
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+      return new File([blob], filename, { type: 'application/json' });
+    }
+
+    // Test functions
+    window.testValidJsonWithCategories = async () => {
+      const data = [
+        { title: 'Prompt 1', content: 'Content 1', category_path: 'Category A' },
+        { title: 'Prompt 2', content: 'Content 2', category_path: 'Category B' }
+      ];
+      const file = createJsonFile(data);
+      const result = await importJsonFile(file, mockApi);
+      displayResult('test1-result', result);
+    };
+
+    window.testValidJsonWithoutCategories = async () => {
+      const data = [
+        { title: 'Prompt 1', content: 'Content 1' },
+        { title: 'Prompt 2', content: 'Content 2' }
+      ];
+      const file = createJsonFile(data);
+      const result = await importJsonFile(file, mockApi, { defaultCategory: '公共' });
+      displayResult('test2-result', result);
+    };
+
+    window.testSingleJsonObject = async () => {
+      const data = { title: 'Single Prompt', content: 'Single Content' };
+      const file = createJsonFile(data);
+      const result = await importJsonFile(file, mockApi);
+      displayResult('test3-result', result);
+    };
+
+    window.testInvalidJson = async () => {
+      const blob = new Blob(['{ invalid json }'], { type: 'application/json' });
+      const file = new File([blob], 'invalid.json', { type: 'application/json' });
+      const result = await importJsonFile(file, mockApi);
+      displayResult('test4-result', result);
+    };
+
+    window.testInvalidPrompts = async () => {
+      const data = [
+        { title: 'Valid Prompt', content: 'Content' },
+        { content: 'No title' },
+        { title: 123, content: 'Invalid title type' },
+        { title: '', content: 'Empty title' }
+      ];
+      const file = createJsonFile(data);
+      const result = await importJsonFile(file, mockApi);
+      displayResult('test5-result', result);
+    };
+
+    window.testEmptyArray = async () => {
+      const data = [];
+      const file = createJsonFile(data);
+      const result = await importJsonFile(file, mockApi);
+      displayResult('test6-result', result);
+    };
+
+    window.testFileUpload = async () => {
+      const fileInput = document.getElementById('fileInput');
+      if (!fileInput.files || fileInput.files.length === 0) {
+        displayResult('test7-result', { success: false, error: 'No file selected' });
+        return;
+      }
+      const file = fileInput.files[0];
+      const result = await importJsonFile(file, mockApi, { defaultCategory: '公共' });
+      displayResult('test7-result', result);
+    };
+
+    function displayResult(elementId, result) {
+      const element = document.getElementById(elementId);
+      const className = result.success ? 'result success' : 'result error';
+      element.innerHTML = `
+        <div class="${className}">
+          <strong>${result.success ? '✓ Success' : '✗ Error'}</strong>
+          <pre>${JSON.stringify(result, null, 2)}</pre>
+        </div>
+      `;
+    }
+  </script>
+</body>
+</html>

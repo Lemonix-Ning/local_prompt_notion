@@ -16,19 +16,16 @@ const isTauri = (() => {
   
   // Tauri 2.x 检测方式
   if ((window as any).__TAURI_INTERNALS__) {
-    console.log('[API Client] Detected Tauri 2.x via __TAURI_INTERNALS__');
     return true;
   }
   
   // Tauri 1.x 兼容检测
   if ((window as any).__TAURI__) {
-    console.log('[API Client] Detected Tauri 1.x via __TAURI__');
     return true;
   }
   
   // 额外检测：检查 Tauri 的 IPC 协议
   if (window.location.protocol === 'tauri:' || (window.location.protocol === 'https:' && window.location.hostname === 'tauri.localhost')) {
-    console.log('[API Client] Detected Tauri via protocol');
     return true;
   }
   
@@ -38,11 +35,6 @@ const isTauri = (() => {
 // 🔥 严格的端口隔离：完全基于 Tauri 检测，忽略环境变量
 // 桌面端 = 3002，网页端 = 3001，互不干扰
 const API_BASE: string = isTauri ? DESKTOP_API_BASE : WEB_API_BASE;
-
-console.log(`[API Client] ========================================`);
-console.log(`[API Client] Mode: ${isTauri ? 'DESKTOP (Tauri)' : 'WEB (Browser)'}`);
-console.log(`[API Client] API Base: ${API_BASE}`);
-console.log(`[API Client] ========================================`);
 
 interface ApiResponse<T = any> {
   success: boolean;
@@ -165,10 +157,11 @@ export const api = {
       scheduled_time?: string | null; // null 表示清除
       categoryPath?: string;
       recurrence?: {
-        type: 'daily' | 'weekly' | 'monthly';
+        type: 'daily' | 'weekly' | 'monthly' | 'interval';
         weekDays?: number[];
         monthDays?: number[];
         time: string;
+        intervalMinutes?: number;
         enabled: boolean;
       } | null; // null 表示清除
     }) =>

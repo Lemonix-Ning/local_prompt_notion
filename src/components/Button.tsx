@@ -1,9 +1,10 @@
+import { memo } from 'react';
 import type { ButtonHTMLAttributes, ReactNode } from 'react';
 
 type ButtonVariant = 'default' | 'ghost';
 type ButtonSize = 'sm' | 'md' | 'icon';
 
-export function Button({
+const ButtonComponent = ({
   children,
   className,
   variant = 'default',
@@ -16,7 +17,7 @@ export function Button({
   variant?: ButtonVariant;
   size?: ButtonSize;
   className?: string;
-} & ButtonHTMLAttributes<HTMLButtonElement>) {
+} & ButtonHTMLAttributes<HTMLButtonElement>) => {
   const base = `btn inline-flex items-center justify-center rounded-lg transition-colors select-none`;
 
   const sizeClass =
@@ -40,4 +41,8 @@ export function Button({
       {children}
     </button>
   );
-}
+};
+
+// Memoize Button to prevent unnecessary re-renders
+export const Button = memo(ButtonComponent);
+Button.displayName = 'Button';

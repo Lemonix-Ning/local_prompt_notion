@@ -41,6 +41,7 @@ interface ImportPromptsDialogProps {
   onClose: () => void;
   onClosed: () => void;
   defaultCategoryPath?: string;
+  embedded?: boolean;
 }
 
 export const ImportPromptsDialog: React.FC<ImportPromptsDialogProps> = ({
@@ -49,6 +50,7 @@ export const ImportPromptsDialog: React.FC<ImportPromptsDialogProps> = ({
   onClose,
   onClosed,
   // defaultCategoryPath 暂时不使用，让用户手动输入
+  embedded = false,
 }) => {
   const { state, refreshVault, createCategory } = useApp();
   const { showToast } = useToast();
@@ -407,15 +409,8 @@ export const ImportPromptsDialog: React.FC<ImportPromptsDialogProps> = ({
     backdropBlur: 8,
   }), []);
 
-  return (
-    <NewPromptOverlay
-      isOpen={isOpen}
-      originId={originId}
-      targetState={targetState}
-      onRequestClose={onClose}
-      onClosed={onClosed}
-    >
-      <div className="h-full flex flex-col bg-white dark:bg-zinc-900 rounded-lg shadow-2xl overflow-hidden">
+  const content = (
+    <div className="h-full flex flex-col bg-white dark:bg-zinc-900 rounded-lg shadow-2xl overflow-hidden">
         {/* 头部 */}
         <div className="flex items-center justify-between p-6 border-b border-gray-200 dark:border-zinc-700">
           <div className="flex items-center gap-3">
@@ -437,9 +432,9 @@ export const ImportPromptsDialog: React.FC<ImportPromptsDialogProps> = ({
           {/* 文件上传区域 - 只在没有选择文件且没有导入结果时显示 */}
           {!importResults && prompts.length === 0 && (
             <div className="flex items-center justify-center h-full px-4">
-              <div className="w-full max-w-3xl">
+              <div className="w-full max-w-5xl">
                 <div
-                  className={`border-2 border-dashed rounded-2xl py-20 px-16 text-center transition-colors ${
+                  className={`border-2 border-dashed rounded-2xl py-24 px-20 text-center transition-colors ${
                     isDragging
                       ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-950/30 dark:border-indigo-400'
                       : 'border-gray-300 dark:border-zinc-700 hover:border-indigo-400 dark:hover:border-indigo-500 bg-gray-50 dark:bg-zinc-950'
@@ -448,7 +443,7 @@ export const ImportPromptsDialog: React.FC<ImportPromptsDialogProps> = ({
                   onDragLeave={handleDragLeave}
                   onDrop={handleDrop}
                 >
-                  <FileJson className="w-24 h-24 mx-auto mb-8 text-gray-400 dark:text-zinc-500" />
+                  <FileJson className="w-28 h-28 mx-auto mb-10 text-gray-400 dark:text-zinc-500" />
                   <p className="text-2xl font-semibold text-gray-700 dark:text-gray-200 mb-4">
                     拖拽 JSON 文件到此处
                   </p>
@@ -785,6 +780,22 @@ export const ImportPromptsDialog: React.FC<ImportPromptsDialogProps> = ({
           </div>
         )}
       </div>
+  );
+
+  if (embedded) {
+    if (!isOpen) return null;
+    return content;
+  }
+
+  return (
+    <NewPromptOverlay
+      isOpen={isOpen}
+      originId={originId}
+      targetState={targetState}
+      onRequestClose={onClose}
+      onClosed={onClosed}
+    >
+      {content}
     </NewPromptOverlay>
   );
 };

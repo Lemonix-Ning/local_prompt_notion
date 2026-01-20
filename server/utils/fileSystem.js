@@ -91,17 +91,21 @@ function isPathSafe(targetPath, vaultRoot) {
 }
 
 /**
- * 递归扫描目录
+ * 递归扫描目录 (with incremental batching for performance)
+ * @param {string} dirPath - Directory to scan
+ * @param {string} rootPath - Root path for reference
+ * @param {number} batchSize - Number of items to process before yielding (default: 50)
  */
-async function scanDirectory(dirPath, rootPath) {
+async function scanDirectory(dirPath, rootPath, batchSize = 50) {
   const nodes = [];
 
   try {
     const entries = await fs.readdir(dirPath, { withFileTypes: true });
+    let processedCount = 0;
 
     for (const entry of entries) {
-      // 跳过隐藏文件夹和 trash 目录
-      if (entry.name.startsWith('.') || entry.name === 'trash') {
+      // 跳过隐藏文件夹、trash 目录和 assets 目录
+      if (entry.name.startsWith('.') || entry.name === 'trash' || entry.name === 'assets') {
         continue;
       }
 
@@ -110,19 +114,25 @@ async function scanDirectory(dirPath, rootPath) {
         const hasMeta = await exists(path.join(fullPath, 'meta.json'));
 
         if (hasMeta) {
-          // 这是一个提示词目录，但在根目录扫描时我们不在这里处理
-          // 提示词会在 loadPromptsInDirectory 中处理
+          // 🔥 修复：如果目录包含 meta.json，说明这是一个提示词，不是分类
+          // 跳过它，让 loadPromptsInDirectory 在父级处理
           continue;
         } else {
           // 这是一个分类文件夹
           const categoryNode = {
             name: entry.name,
             path: fullPath,
-            children: await scanDirectory(fullPath, rootPath),
-            prompts: await loadPromptsInDirectory(fullPath),
+            children: await scanDirectory(fullPath, rootPath, batchSize),
+            prompts: await loadPromptsInDirectory(fullPath, batchSize),
           };
           nodes.push(categoryNode);
         }
+      }
+
+      // 🚀 Performance: Yield to event loop after processing batch
+      processedCount++;
+      if (processedCount % batchSize === 0) {
+        await new Promise(resolve => setImmediate(resolve));
       }
     }
   } catch (error) {
@@ -133,13 +143,16 @@ async function scanDirectory(dirPath, rootPath) {
 }
 
 /**
- * 加载目录中的所有提示词
+ * 加载目录中的所有提示词 (with incremental batching for performance)
+ * @param {string} dirPath - Directory to load prompts from
+ * @param {number} batchSize - Number of items to process before yielding (default: 50)
  */
-async function loadPromptsInDirectory(dirPath) {
+async function loadPromptsInDirectory(dirPath, batchSize = 50) {
   const prompts = [];
 
   try {
     const entries = await fs.readdir(dirPath, { withFileTypes: true });
+    let processedCount = 0;
 
     for (const entry of entries) {
       if (entry.isDirectory()) {
@@ -154,6 +167,12 @@ async function loadPromptsInDirectory(dirPath) {
             // Error reading prompt
           }
         }
+      }
+
+      // 🚀 Performance: Yield to event loop after processing batch
+      processedCount++;
+      if (processedCount % batchSize === 0) {
+        await new Promise(resolve => setImmediate(resolve));
       }
     }
   } catch (error) {
@@ -219,6 +238,12 @@ async function writePrompt(promptPath, data, options = {}) {
 async function createPrompt(categoryPath, promptData) {
   const baseSlug = titleToSlug(promptData.title);
   
+  // 如果 slug 为空（标题只包含特殊字符），使用时间戳
+  if (!baseSlug || baseSlug.trim() === '') {
+    const timestamp = Date.now();
+    baseSlug = `untitled_${timestamp}`;
+  }
+  
   let slug = baseSlug;
   let promptPath = path.join(categoryPath, slug);
   let counter = 1;
@@ -228,6 +253,11 @@ async function createPrompt(categoryPath, promptData) {
     slug = `${baseSlug}_${counter}`;
     promptPath = path.join(categoryPath, slug);
     counter++;
+    
+    // 安全保护：防止无限循环
+    if (counter > 1000) {
+      throw new Error(`Failed to create unique slug for "${promptData.title}" after 1000 attempts`);
+    }
   }
 
   // 从路径中提取分类名称
@@ -261,6 +291,11 @@ async function createPrompt(categoryPath, promptData) {
   }
   if (promptData.recurrence) {
     meta.recurrence = promptData.recurrence;
+    // 🔥 关键修复：创建 interval 任务时，初始化 last_notified 为当前时间
+    // 这样 Auto-Heal 机制才能正确判断是否进入新周期
+    if (promptData.recurrence.type === 'interval' && !promptData.last_notified) {
+      meta.last_notified = new Date().toISOString();
+    }
   }
   if (promptData.last_notified) {
     meta.last_notified = promptData.last_notified;
@@ -475,22 +510,34 @@ async function restorePrompt(promptPath, vaultRoot) {
       counter++;
     }
     
+    // 先移动文件，再更新 meta.json
+    await fs.rename(promptPath, finalPath);
+    
     // 清除恢复相关的临时字段
     delete meta.original_path;
     delete meta.original_category;
     delete meta.original_category_path;
     
+    // 更新 category_path 为最终路径的父目录
+    meta.category_path = path.dirname(finalPath);
+    
+    // 更新 category 为最终路径的父目录名称
+    if (path.normalize(meta.category_path) === path.normalize(vaultRoot)) {
+      meta.category = '';
+    } else {
+      meta.category = path.basename(meta.category_path);
+    }
+    
     // 更新时间戳
     meta.updated_at = new Date().toISOString();
     
-    // 写入更新后的元数据
-    await fs.writeFile(metaPath, JSON.stringify(meta, null, 2), 'utf-8');
-    
-    // 移动文件
-    await fs.rename(promptPath, finalPath);
+    // 写入更新后的元数据到新位置
+    const newMetaPath = path.join(finalPath, 'meta.json');
+    await fs.writeFile(newMetaPath, JSON.stringify(meta, null, 2), 'utf-8');
     
     return finalPath;
   } catch (error) {
+    console.error('[restorePrompt] Error:', error);
     throw error;
   }
 }
@@ -891,6 +938,21 @@ async function findPromptPathById(categories, promptId, vaultRoot) {
     }
   } catch (error) {
     // Error searching root directory prompts
+  }
+
+  // 如果还没找到，搜索回收站
+  try {
+    const trashPath = path.join(vaultRoot, 'trash');
+    if (await exists(trashPath)) {
+      const trashPrompts = await loadPromptsInDirectory(trashPath);
+      for (const prompt of trashPrompts) {
+        if (prompt.meta.id === promptId) {
+          return prompt.path;
+        }
+      }
+    }
+  } catch (error) {
+    console.error('[findPromptPathById] Error searching trash:', error);
   }
 
   return null;

@@ -26,6 +26,19 @@ const {
 const rawVaultPath = process.env.VAULT_PATH && process.env.VAULT_PATH.trim();
 const VAULT_ROOT = rawVaultPath || path.join(__dirname, '../../vault');
 
+// 🚀 Performance: Get API cache instance for invalidation
+let apiCache = null;
+const getApiCache = () => {
+  if (!apiCache) {
+    try {
+      apiCache = require('./vault').apiCache;
+    } catch (error) {
+      // Cache not available
+    }
+  }
+  return apiCache;
+};
+
 // 配置 multer 用于图片上传
 const storage = multer.memoryStorage();
 const upload = multer({
@@ -144,6 +157,12 @@ router.post('/', async (req, res, next) => {
     // 创建提示词
     const prompt = await createPrompt(categoryPath, promptData);
 
+    // 🚀 Performance: Invalidate cache after data modification
+    const cache = getApiCache();
+    if (cache) {
+      cache.invalidate('/api/vault/');
+    }
+
     res.status(201).json({
       success: true,
       data: prompt,
@@ -201,6 +220,12 @@ router.put('/:id', async (req, res, next) => {
 
     const updatedPrompt = await updatePrompt(workingPath, restUpdates);
 
+    // 🚀 Performance: Invalidate cache after data modification
+    const cache = getApiCache();
+    if (cache) {
+      cache.invalidate('/api/vault/');
+    }
+
     res.json({
       success: true,
       data: updatedPrompt,
@@ -233,6 +258,13 @@ router.delete('/:id', async (req, res, next) => {
     if (permanent === 'true') {
       // 永久删除
       await permanentlyDeletePrompt(promptPath);
+      
+      // 🚀 Performance: Invalidate cache after data modification
+      const cache = getApiCache();
+      if (cache) {
+        cache.invalidate('/api/vault/');
+      }
+      
       res.json({
         success: true,
         message: 'Prompt permanently deleted',
@@ -240,6 +272,13 @@ router.delete('/:id', async (req, res, next) => {
     } else {
       // 移动到回收站
       await deletePrompt(promptPath, VAULT_ROOT);
+      
+      // 🚀 Performance: Invalidate cache after data modification
+      const cache = getApiCache();
+      if (cache) {
+        cache.invalidate('/api/vault/');
+      }
+      
       res.json({
         success: true,
         message: 'Prompt moved to trash',
@@ -314,6 +353,12 @@ router.post('/batch-delete', async (req, res, next) => {
       }
     }
 
+    // 🚀 Performance: Invalidate cache after data modification
+    const cache = getApiCache();
+    if (cache) {
+      cache.invalidate('/api/vault/');
+    }
+
     res.json({
       success: true,
       results,
@@ -353,12 +398,19 @@ router.post('/:id/restore', async (req, res, next) => {
 
     const restoredPath = await restorePrompt(promptPath, VAULT_ROOT);
 
+    // 🚀 Performance: Invalidate cache after data modification
+    const cache = getApiCache();
+    if (cache) {
+      cache.invalidate('/api/vault/');
+    }
+
     res.json({
       success: true,
       message: 'Prompt restored',
       data: { path: restoredPath },
     });
   } catch (error) {
+    console.error('[Restore API] Error:', error);
     next(error);
   }
 });
@@ -563,17 +615,13 @@ router.post('/import', async (req, res, next) => {
             let counter = 1;
             let newTitle = `${baseTitle}_X${counter}`;
             
-            console.log('[导入冲突] 原标题:', baseTitle, '→ 新标题:', newTitle);
-            
             // 检查新标题是否也冲突
             while (existingTitles.has(newTitle.toLowerCase())) {
               counter++;
               newTitle = `${baseTitle}_X${counter}`;
-              console.log('[导入冲突] 递增:', newTitle);
             }
             
             promptData.title = newTitle;
-            console.log('[导入冲突] 最终标题:', promptData.title);
           } else if (conflictStrategy === 'overwrite') {
             // 覆盖：先删除旧的
             await deletePrompt(existingPrompt.path, VAULT_ROOT);
@@ -615,6 +663,12 @@ router.post('/import', async (req, res, next) => {
           error: error.message,
         });
       }
+    }
+
+    // 🚀 Performance: Invalidate cache after data modification
+    const cache = getApiCache();
+    if (cache) {
+      cache.invalidate('/api/vault/');
     }
 
     // 返回结果

@@ -21,14 +21,20 @@ import { useToast } from '../contexts/ToastContext';
 import { useCountdown } from '../hooks/useCountdown';
 import { RecurrenceSelector } from './RecurrenceSelector';
 import { ContentSearchBar, type SearchMatch } from './ContentSearchBar';
-import { MarkdownRenderer } from './MarkdownRenderer';
+import { lazy, Suspense } from 'react';
 import { getNextTriggerTime } from '../utils/recurrenceTag';
 import type { RecurrenceConfig } from '../types';
+
+// Lazy load MarkdownRenderer to reduce initial bundle size
+const MarkdownRenderer = lazy(() => import('./MarkdownRenderer').then(module => ({ default: module.MarkdownRenderer })));
 
 interface TaskEditorOverlayProps {
   promptId: string;
   originCardId: string;
   onClose: () => void;
+  // 🔥 卡片导航支持
+  promptIds?: string[]; // 当前视图的所有卡片 ID 列表
+  onNavigate?: (promptId: string, originCardId: string) => void; // 导航到其他卡片
 }
 
 interface AnimationState {
@@ -43,7 +49,7 @@ interface AnimationState {
   backdropBlur?: number;
 }
 
-export function TaskEditorOverlay({ promptId, originCardId, onClose }: TaskEditorOverlayProps) {
+export function TaskEditorOverlay({ promptId, originCardId, onClose, promptIds, onNavigate }: TaskEditorOverlayProps) {
   const { theme } = useTheme();
   const { state, savePrompt, deletePrompt } = useApp();
   const { showToast } = useToast();
@@ -61,6 +67,14 @@ export function TaskEditorOverlay({ promptId, originCardId, onClose }: TaskEdito
   const [isEditing, setIsEditing] = useState(false); // 🔥 编辑模式
   const contentTextareaRef = useRef<HTMLTextAreaElement>(null);
   const markdownContainerRef = useRef<HTMLDivElement>(null);
+  
+  // 🔥 双击检测：区分单击进入编辑 vs 双击进入专注模式
+  const clickTimerRef = useRef<number | null>(null);
+  const clickCountRef = useRef<number>(0);
+  
+  // 🔥 右键菜单状态
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
+  const contextMenuRef = useRef<HTMLDivElement>(null);
   
   const prevMountedRef = useRef(false);
   const dateInputRef = useRef<HTMLInputElement>(null);
@@ -97,18 +111,30 @@ export function TaskEditorOverlay({ promptId, originCardId, onClose }: TaskEdito
   const currentTargetDate = useMemo(() => {
     if (recurrence?.enabled) {
       // 重复任务：计算下一次触发时间
-      return getNextTriggerTime(recurrence);
+      return getNextTriggerTime(recurrence, prompt?.meta.last_notified ?? prompt?.meta.created_at);
     } else if (scheduledTime) {
       // 一次性任务：使用用户设置的时间
       return new Date(scheduledTime).toISOString();
     }
     return new Date().toISOString();
-  }, [recurrence, scheduledTime]);
+  }, [recurrence?.enabled, recurrence?.type, recurrence?.intervalMinutes, recurrence?.time, scheduledTime, prompt?.meta.last_notified, prompt?.meta.created_at]);
+
+  // 🔥 稳定化 recurrence 对象，避免无限循环
+  const stableRecurrence = useMemo(() => {
+    if (recurrence?.type === 'interval' && recurrence.intervalMinutes) {
+      return {
+        type: 'interval' as const,
+        intervalMinutes: recurrence.intervalMinutes
+      };
+    }
+    return undefined;
+  }, [recurrence?.type, recurrence?.intervalMinutes]);
 
   // 倒计时 - 使用当前编辑状态的时间，而不是原始数据
   const countdown = useCountdown(
     currentTargetDate,
-    prompt?.meta.created_at // 传入创建时间作为开始时间
+    prompt?.meta.created_at, // 传入创建时间作为开始时间
+    stableRecurrence
   );
 
   // 动画相关
@@ -127,6 +153,17 @@ export function TaskEditorOverlay({ promptId, originCardId, onClose }: TaskEdito
     const originCard = document.getElementById(originCardId);
     if (originCard) {
       const rect = originCard.getBoundingClientRect();
+      
+      // 🔥 修复：在隐藏新卡片之前，先恢复所有之前被隐藏的卡片
+      // 这样可以确保在导航时，之前的卡片会被正确恢复显示
+      const allCards = document.querySelectorAll('[id^="prompt-card-"]');
+      allCards.forEach((card) => {
+        if (card.id !== originCardId && (card as HTMLElement).style.opacity === '0') {
+          (card as HTMLElement).style.opacity = '';
+        }
+      });
+      
+      // 隐藏当前卡片
       originCard.style.opacity = '0';
 
       setAnimationState({
@@ -241,6 +278,70 @@ export function TaskEditorOverlay({ promptId, originCardId, onClose }: TaskEdito
         return;
       }
       
+      // 🔥 左右箭头：切换卡片
+      if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+        // 如果正在编辑文本，不拦截箭头键
+        if (isEditing) return;
+        
+        // 如果有卡片列表和导航回调
+        if (promptIds && promptIds.length > 1 && onNavigate) {
+          e.preventDefault();
+          const currentIndex = promptIds.indexOf(promptId);
+          
+          if (e.key === 'ArrowLeft' && currentIndex > 0) {
+            // 上一张卡片
+            const prevId = promptIds[currentIndex - 1];
+            const prevOriginCardId = `prompt-card-${prevId}`;
+            onNavigate(prevId, prevOriginCardId);
+          } else if (e.key === 'ArrowRight' && currentIndex < promptIds.length - 1) {
+            // 下一张卡片
+            const nextId = promptIds[currentIndex + 1];
+            const nextOriginCardId = `prompt-card-${nextId}`;
+            onNavigate(nextId, nextOriginCardId);
+          }
+        }
+        return;
+      }
+      
+      // 🔥 上下箭头：滚动内容
+      if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+        // 如果正在编辑文本，不拦截箭头键
+        if (isEditing) return;
+        
+        // 如果有滚动容器
+        if (scrollableRef.current) {
+          e.preventDefault();
+          const scrollAmount = 100; // 每次滚动 100px
+          const direction = e.key === 'ArrowUp' ? -1 : 1;
+          scrollableRef.current.scrollBy({
+            top: scrollAmount * direction,
+            behavior: 'smooth'
+          });
+        }
+        return;
+      }
+      
+      // 🔥 空格键：循环切换 正常 → 扩大 → 专注 → 正常
+      if (e.key === ' ') {
+        e.preventDefault();
+        
+        // 状态机：正常(未扩大且未专注) → 扩大 → 专注 → 正常
+        if (!isExpanded && !isFocusMode) {
+          // 正常 → 扩大
+          toggleExpanded();
+        } else if (isExpanded && !isFocusMode) {
+          // 扩大 → 专注
+          toggleFocusMode();
+        } else if (isFocusMode) {
+          // 专注 → 正常（退出专注模式，同时退出扩大模式）
+          setIsFocusMode(false);
+          if (isExpanded) {
+            toggleExpanded();
+          }
+        }
+        return;
+      }
+      
       // ESC 关闭搜索或编辑器
       if (e.key === 'Escape') {
         if (isSearchVisible) {
@@ -252,14 +353,28 @@ export function TaskEditorOverlay({ promptId, originCardId, onClose }: TaskEdito
     };
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [isSearchVisible]);
+  }, [isSearchVisible, isExpanded, isFocusMode, isEditing, promptId, promptIds, onNavigate]); // 🔥 添加依赖项
+  
+  // 🔥 右键菜单：点击外部关闭
+  useEffect(() => {
+    if (!contextMenu) return;
+    
+    const handleClickOutside = (e: MouseEvent) => {
+      if (contextMenuRef.current && !contextMenuRef.current.contains(e.target as Node)) {
+        setContextMenu(null);
+      }
+    };
+    
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [contextMenu]);
 
   // 搜索高亮回调
   const handleSearchHighlight = useCallback((_matches: SearchMatch[], _currentIndex: number) => {
     // 预留：将来可以用于高亮显示匹配文本
   }, []);
 
-  const handleClose = async () => {
+  const handleClose = useCallback(async () => {
     if (isClosing) return;
 
     // 使用初始状态进行比较，避免误触发保存
@@ -299,11 +414,6 @@ export function TaskEditorOverlay({ promptId, originCardId, onClose }: TaskEdito
     setIsClosing(true);
 
     const originCard = document.getElementById(originCardId);
-    if (originCard) {
-      setTimeout(() => {
-        originCard.style.opacity = '1';
-      }, Math.floor(durationCloseMs * 0.7));
-    }
 
     if (animationState) {
       const originRect = originCard ? originCard.getBoundingClientRect() : null;
@@ -330,10 +440,18 @@ export function TaskEditorOverlay({ promptId, originCardId, onClose }: TaskEdito
       setAnimationState(closeState);
     }
 
+    // 🔥 修复：在关闭动画完成后恢复原卡片显示并调用 onClose
     setTimeout(() => {
-      onClose();
+      if (originCard) {
+        // 恢复为空字符串，让 CSS 控制 opacity
+        originCard.style.opacity = '';
+      }
+      // 延迟调用 onClose，确保动画完成
+      requestAnimationFrame(() => {
+        onClose();
+      });
     }, durationCloseMs);
-  };
+  }, [isClosing, prompt, title, content, scheduledTime, recurrence, savePrompt, showToast, originCardId, animationState, onClose, durationCloseMs]);
 
   const handleDelete = async () => {
     if (!prompt) return;
@@ -764,7 +882,13 @@ export function TaskEditorOverlay({ promptId, originCardId, onClose }: TaskEdito
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <Repeat size={14} style={{ color: '#f43f5e' }} />
                 <span style={{ fontSize: '13px', color: '#f43f5e', fontWeight: 500 }}>
-                  {recurrence.type === 'daily' ? '每天' : recurrence.type === 'weekly' ? '每周' : '每月'} · {recurrence.time}
+                  {recurrence.type === 'daily'
+                    ? `每天 · ${recurrence.time}`
+                    : recurrence.type === 'weekly'
+                    ? `每周 · ${recurrence.time}`
+                    : recurrence.type === 'monthly'
+                    ? `每月 · ${recurrence.time}`
+                    : `每隔 ${Math.max(1, recurrence.intervalMinutes ?? 1)} 分钟`}
                 </span>
               </div>
               <span style={{ fontSize: '11px', color: theme === 'dark' ? 'rgba(255,255,255,0.5)' : 'rgba(0,0,0,0.5)' }}>
@@ -812,7 +936,19 @@ export function TaskEditorOverlay({ promptId, originCardId, onClose }: TaskEdito
           )}
 
           {/* 内容区域 - 专注模式下铺满 */}
-          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', position: 'relative' }}>
+          <div 
+            style={{ flex: 1, display: 'flex', flexDirection: 'column', position: 'relative' }}
+            onDoubleClick={(e) => {
+              // 🔥 双击容器空白区域（不是 textarea 内部）时切换专注模式
+              const target = e.target as HTMLElement;
+              const isTextarea = target.tagName === 'TEXTAREA';
+              
+              if (!isTextarea) {
+                e.stopPropagation();
+                toggleFocusMode();
+              }
+            }}
+          >
             {/* 🔥 搜索栏 */}
             <ContentSearchBar
               content={content}
@@ -831,7 +967,20 @@ export function TaskEditorOverlay({ promptId, originCardId, onClose }: TaskEdito
                 ref={contentTextareaRef}
                 value={content}
                 onChange={(e) => setContent(e.target.value)}
-                onBlur={() => setIsEditing(false)}
+                onBlur={() => {
+                  // 🔥 失去焦点时退出编辑模式，回到预览
+                  setIsEditing(false);
+                }}
+                onContextMenu={(e) => {
+                  // 🔥 右键菜单
+                  e.preventDefault();
+                  setContextMenu({ x: e.clientX, y: e.clientY });
+                }}
+                onDoubleClick={(e) => {
+                  // 🔥 阻止默认的双击全选行为，改为切换专注模式
+                  e.preventDefault();
+                  toggleFocusMode();
+                }}
                 onKeyDown={(e) => {
                   // Tab 键插入空格
                   if (e.key === 'Tab') {
@@ -844,11 +993,6 @@ export function TaskEditorOverlay({ promptId, originCardId, onClose }: TaskEdito
                     requestAnimationFrame(() => {
                       textarea.selectionStart = textarea.selectionEnd = start + 2;
                     });
-                  }
-                  // ESC 退出编辑
-                  if (e.key === 'Escape') {
-                    e.preventDefault();
-                    setIsEditing(false);
                   }
                 }}
                 placeholder="任务描述... (支持 Markdown)"
@@ -870,10 +1014,27 @@ export function TaskEditorOverlay({ promptId, originCardId, onClose }: TaskEdito
             ) : (
               <div
                 ref={markdownContainerRef}
-                onClick={() => setIsEditing(true)}
-                onDoubleClick={(e) => {
-                  e.stopPropagation();
-                  toggleFocusMode();
+                onClick={(e) => {
+                  // 🔥 双击检测逻辑
+                  clickCountRef.current += 1;
+                  
+                  if (clickCountRef.current === 1) {
+                    // 第一次点击：等待 300ms 看是否有第二次点击
+                    clickTimerRef.current = window.setTimeout(() => {
+                      // 300ms 后仍然只有一次点击 → 进入编辑模式
+                      setIsEditing(true);
+                      clickCountRef.current = 0;
+                    }, 300);
+                  } else if (clickCountRef.current === 2) {
+                    // 第二次点击（双击）→ 进入专注模式
+                    if (clickTimerRef.current) {
+                      clearTimeout(clickTimerRef.current);
+                      clickTimerRef.current = null;
+                    }
+                    e.stopPropagation();
+                    toggleFocusMode();
+                    clickCountRef.current = 0;
+                  }
                 }}
                 style={{
                   flex: 1,
@@ -883,7 +1044,12 @@ export function TaskEditorOverlay({ promptId, originCardId, onClose }: TaskEdito
                 }}
               >
                 {content.trim() ? (
-                  <MarkdownRenderer content={content} theme={theme} />
+                  <Suspense fallback={<div style={{ color: theme === 'dark' ? 'rgba(255,255,255,0.4)' : 'rgba(0,0,0,0.4)', fontSize: '14px' }}>加载中...</div>}>
+                    <MarkdownRenderer 
+                      content={content} 
+                      theme={theme}
+                    />
+                  </Suspense>
                 ) : (
                   <div 
                     style={{ 
@@ -900,6 +1066,56 @@ export function TaskEditorOverlay({ promptId, originCardId, onClose }: TaskEdito
           </div>
         </div>
       </div>
+      
+      {/* 🔥 右键菜单 */}
+      {contextMenu && typeof document !== 'undefined' && createPortal(
+        <div
+          ref={contextMenuRef}
+          style={{
+            position: 'fixed',
+            left: contextMenu.x,
+            top: contextMenu.y,
+            zIndex: 1000002,
+            backgroundColor: theme === 'dark' ? 'rgba(30,30,30,0.95)' : 'rgba(255,255,255,0.95)',
+            backdropFilter: 'blur(10px)',
+            border: `1px solid ${theme === 'dark' ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)'}`,
+            borderRadius: '8px',
+            boxShadow: theme === 'dark' 
+              ? '0 4px 12px rgba(0,0,0,0.5)' 
+              : '0 4px 12px rgba(0,0,0,0.15)',
+            padding: '4px',
+            minWidth: '160px',
+          }}
+        >
+          <button
+            onClick={() => {
+              setIsEditing(false);
+              setContextMenu(null);
+            }}
+            style={{
+              width: '100%',
+              padding: '8px 12px',
+              border: 'none',
+              background: 'transparent',
+              color: theme === 'dark' ? 'rgba(255,255,255,0.9)' : 'rgba(0,0,0,0.9)',
+              fontSize: '14px',
+              textAlign: 'left',
+              cursor: 'pointer',
+              borderRadius: '4px',
+              transition: 'background 0.15s',
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = theme === 'dark' ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.05)';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = 'transparent';
+            }}
+          >
+            切换预览
+          </button>
+        </div>,
+        document.body
+      )}
     </>,
     document.body
   );

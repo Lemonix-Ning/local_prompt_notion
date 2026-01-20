@@ -5,6 +5,7 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { Search, X, ChevronUp, ChevronDown } from 'lucide-react';
+import { useDebounce } from '../utils/debounce';
 
 interface ContentSearchBarProps {
   content: string;
@@ -33,6 +34,9 @@ export function ContentSearchBar({
   const [matches, setMatches] = useState<SearchMatch[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  // Debounce search query to avoid excessive re-renders (300ms delay)
+  const debouncedQuery = useDebounce(query, 300);
 
   // 搜索逻辑
   const performSearch = useCallback((searchQuery: string) => {
@@ -107,10 +111,10 @@ export function ContentSearchBar({
     scrollToMatch(matches[newIndex]);
   }, [matches, currentIndex, onHighlight, scrollToMatch]);
 
-  // 当搜索词变化时执行搜索
+  // 当搜索词变化时执行搜索 (debounced)
   useEffect(() => {
-    performSearch(query);
-  }, [query, performSearch]);
+    performSearch(debouncedQuery);
+  }, [debouncedQuery, performSearch]);
 
   // 显示时聚焦输入框
   useEffect(() => {

@@ -48,6 +48,7 @@ execSync(`pkg "${serverEntry}" --targets ${pkgTarget} --output "${tmpOut}"`, {
   stdio: 'inherit',
   env: {
     ...process.env,
+    CI: '1',
     PKG_CACHE_PATH: pkgCacheDir,
   },
 });

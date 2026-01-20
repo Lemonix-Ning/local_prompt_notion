@@ -26,12 +26,18 @@ import { getIconGradientConfig, getTagStyle } from '../utils/tagColors';
 import { useToast } from '../contexts/ToastContext';
 import { useConfirm } from '../contexts/ConfirmContext';
 import { ContentSearchBar, type SearchMatch } from './ContentSearchBar';
-import { MarkdownRenderer } from './MarkdownRenderer';
+import { lazy, Suspense } from 'react';
+
+// Lazy load MarkdownRenderer to reduce initial bundle size
+const MarkdownRenderer = lazy(() => import('./MarkdownRenderer').then(module => ({ default: module.MarkdownRenderer })));
 
 interface EditorOverlayProps {
   promptId: string;
   originCardId: string;
   onClose: () => void;
+  // 🔥 卡片导航支持
+  promptIds?: string[]; // 当前视图的所有卡片 ID 列表
+  onNavigate?: (promptId: string, originCardId: string) => void; // 导航到其他卡片
 }
 
 interface AnimationState {
@@ -425,7 +431,7 @@ function CategorySelector({ currentCategory, onCategoryChange, theme, vaultRoot 
   );
 }
 
-export function EditorOverlay({ promptId, originCardId, onClose }: EditorOverlayProps) {
+export function EditorOverlay({ promptId, originCardId, onClose, promptIds, onNavigate }: EditorOverlayProps) {
   const { theme } = useTheme();
   const { state, savePrompt, deletePrompt } = useApp();
   const { showToast } = useToast();
@@ -440,6 +446,14 @@ export function EditorOverlay({ promptId, originCardId, onClose }: EditorOverlay
   const [isEditing, setIsEditing] = useState(false); // 🔥 编辑模式：默认显示渲染后的 Markdown
   const contentTextareaRef = useRef<HTMLTextAreaElement>(null);
   const markdownContainerRef = useRef<HTMLDivElement>(null);
+  
+  // 🔥 双击检测：区分单击进入编辑 vs 双击进入专注模式
+  const clickTimerRef = useRef<number | null>(null);
+  const clickCountRef = useRef<number>(0);
+  
+  // 🔥 右键菜单状态
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
+  const contextMenuRef = useRef<HTMLDivElement>(null);
 
   const scrollableRef = useRef<HTMLDivElement>(null);
   const scrollTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -448,6 +462,127 @@ export function EditorOverlay({ promptId, originCardId, onClose }: EditorOverlay
   const [isBursting, setIsBursting] = useState(false);
   const [burstAnchor, setBurstAnchor] = useState<{ x: number; y: number } | null>(null);
   const burstTimerRef = useRef<number | null>(null);
+
+  // 🔥 图片粘贴状态
+  const [isUploadingImage, setIsUploadingImage] = useState(false);
+
+  /**
+   * 处理图片粘贴
+   */
+  const handlePaste = async (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+
+    // 检查是否有图片
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      
+      if (item.type.startsWith('image/')) {
+        e.preventDefault(); // 阻止默认粘贴行为
+        
+        const file = item.getAsFile();
+        if (!file || !prompt) return;
+        
+        try {
+          setIsUploadingImage(true);
+          
+          // 在光标位置插入占位符
+          const textarea = contentTextareaRef.current;
+          if (!textarea) return;
+          
+          const start = textarea.selectionStart;
+          const end = textarea.selectionEnd;
+          const loadingId = `loading-${Date.now()}`;
+          const placeholder = `![正在上传图片...](${loadingId})`;
+          
+          const newContent = content.substring(0, start) + placeholder + content.substring(end);
+          setContent(newContent);
+          
+          // 将图片转换为 base64
+          const reader = new FileReader();
+          reader.onload = async () => {
+            try {
+              const base64Data = reader.result as string;
+              
+              // 上传图片
+              const apiBaseUrl = typeof window !== 'undefined' && window.location.port === '1420' 
+                ? 'http://localhost:3002'
+                : 'http://localhost:3001';
+              
+              const response = await fetch(`${apiBaseUrl}/api/images/upload`, {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                  imageData: base64Data,
+                  promptId: prompt.meta.id,
+                }),
+              });
+              
+              if (!response.ok) {
+                throw new Error('图片上传失败');
+              }
+              
+              const result = await response.json();
+              
+              // 使用引用式链接：找到下一个可用的引用编号
+              const existingRefs = newContent.match(/\[(\d+)\]:/g) || [];
+              const maxRef = existingRefs.length > 0 
+                ? Math.max(...existingRefs.map(r => parseInt(r.match(/\d+/)?.[0] || '0')))
+                : 0;
+              const refNum = maxRef + 1;
+              
+              // 正文使用简短的引用标记
+              const imageMd = `![图片][${refNum}]`;
+              
+              // 在文档末尾添加引用定义
+              const refDefinition = `\n[${refNum}]: ${result.path}`;
+              const contentWithoutPlaceholder = newContent.replace(placeholder, imageMd);
+              const finalContent = contentWithoutPlaceholder + refDefinition;
+              
+              setContent(finalContent);
+              
+              // 恢复光标位置
+              requestAnimationFrame(() => {
+                if (textarea) {
+                  const newCursorPos = start + imageMd.length;
+                  textarea.selectionStart = textarea.selectionEnd = newCursorPos;
+                  textarea.focus();
+                }
+              });
+              
+              showToast('图片上传成功', 'success');
+              
+            } catch (error) {
+              console.error('图片上传失败:', error);
+              // 移除占位符
+              setContent(newContent.replace(placeholder, ''));
+              showToast('图片上传失败', 'error');
+            } finally {
+              setIsUploadingImage(false);
+            }
+          };
+          
+          reader.onerror = () => {
+            showToast('图片读取失败', 'error');
+            setIsUploadingImage(false);
+            // 移除占位符
+            setContent(newContent.replace(placeholder, ''));
+          };
+          
+          reader.readAsDataURL(file);
+          
+        } catch (error) {
+          console.error('处理图片粘贴失败:', error);
+          showToast('处理图片失败', 'error');
+          setIsUploadingImage(false);
+        }
+        
+        break; // 只处理第一张图片
+      }
+    }
+  };
 
   const fireworkParticles = useMemo(() => {
     return Array.from({ length: 8 }).map((_, i) => {
@@ -669,18 +804,19 @@ export function EditorOverlay({ promptId, originCardId, onClose }: EditorOverlay
           };
 
       setAnimationState(closeState);
-
-      // 在动画进行到70%时显示原卡片
-      if (originCard) {
-        setTimeout(() => {
-          originCard.style.opacity = '1';
-        }, 200); // 280ms * 0.7 ≈ 200ms
-      }
     }
 
-    // 动画完成后清理
+    // 🔥 修复：在关闭动画完成后恢复原卡片显示并调用 onClose
+    // 使用 setTimeout 而不是 transitionend 事件，因为更可靠
     setTimeout(() => {
-      onClose();
+      if (originCard) {
+        // 恢复为空字符串，让 CSS 控制 opacity
+        originCard.style.opacity = '';
+      }
+      // 延迟调用 onClose，确保动画完成
+      requestAnimationFrame(() => {
+        onClose();
+      });
     }, 280);
   };
 
@@ -724,6 +860,70 @@ export function EditorOverlay({ promptId, originCardId, onClose }: EditorOverlay
         return;
       }
       
+      // 🔥 左右箭头：切换卡片
+      if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+        // 如果正在编辑文本，不拦截箭头键
+        if (isEditing) return;
+        
+        // 如果有卡片列表和导航回调
+        if (promptIds && promptIds.length > 1 && onNavigate) {
+          e.preventDefault();
+          const currentIndex = promptIds.indexOf(promptId);
+          
+          if (e.key === 'ArrowLeft' && currentIndex > 0) {
+            // 上一张卡片
+            const prevId = promptIds[currentIndex - 1];
+            const prevOriginCardId = `prompt-card-${prevId}`;
+            onNavigate(prevId, prevOriginCardId);
+          } else if (e.key === 'ArrowRight' && currentIndex < promptIds.length - 1) {
+            // 下一张卡片
+            const nextId = promptIds[currentIndex + 1];
+            const nextOriginCardId = `prompt-card-${nextId}`;
+            onNavigate(nextId, nextOriginCardId);
+          }
+        }
+        return;
+      }
+      
+      // 🔥 上下箭头：滚动内容
+      if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+        // 如果正在编辑文本，不拦截箭头键
+        if (isEditing) return;
+        
+        // 如果有滚动容器
+        if (scrollableRef.current) {
+          e.preventDefault();
+          const scrollAmount = 100; // 每次滚动 100px
+          const direction = e.key === 'ArrowUp' ? -1 : 1;
+          scrollableRef.current.scrollBy({
+            top: scrollAmount * direction,
+            behavior: 'smooth'
+          });
+        }
+        return;
+      }
+      
+      // 🔥 空格键：循环切换 正常 → 扩大 → 专注 → 正常
+      if (e.key === ' ') {
+        e.preventDefault();
+        
+        // 状态机：正常(未扩大且未专注) → 扩大 → 专注 → 正常
+        if (!isExpanded && !isFocusMode) {
+          // 正常 → 扩大
+          toggleExpanded();
+        } else if (isExpanded && !isFocusMode) {
+          // 扩大 → 专注
+          toggleFocusMode();
+        } else if (isFocusMode) {
+          // 专注 → 正常（退出专注模式，同时退出扩大模式）
+          setIsFocusMode(false);
+          if (isExpanded) {
+            toggleExpanded();
+          }
+        }
+        return;
+      }
+      
       // ESC 关闭搜索或编辑器
       if (e.key === 'Escape') {
         if (isSearchVisible) {
@@ -736,7 +936,21 @@ export function EditorOverlay({ promptId, originCardId, onClose }: EditorOverlay
 
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [isSearchVisible]);
+  }, [isSearchVisible, handleClose, isExpanded, isFocusMode, isEditing, promptId, promptIds, onNavigate]); // 🔥 添加依赖项
+  
+  // 🔥 右键菜单：点击外部关闭
+  useEffect(() => {
+    if (!contextMenu) return;
+    
+    const handleClickOutside = (e: MouseEvent) => {
+      if (contextMenuRef.current && !contextMenuRef.current.contains(e.target as Node)) {
+        setContextMenu(null);
+      }
+    };
+    
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [contextMenu]);
 
   // 搜索高亮回调
   const handleSearchHighlight = useCallback((_matches: SearchMatch[], _currentIndex: number) => {
@@ -750,7 +964,16 @@ export function EditorOverlay({ promptId, originCardId, onClose }: EditorOverlay
     if (originCard) {
       const rect = originCard.getBoundingClientRect();
       
-      // 隐藏原卡片
+      // 🔥 修复：在隐藏新卡片之前，先恢复所有之前被隐藏的卡片
+      // 这样可以确保在导航时，之前的卡片会被正确恢复显示
+      const allCards = document.querySelectorAll('[id^="prompt-card-"]');
+      allCards.forEach((card) => {
+        if (card.id !== originCardId && (card as HTMLElement).style.opacity === '0') {
+          (card as HTMLElement).style.opacity = '';
+        }
+      });
+      
+      // 隐藏当前卡片
       originCard.style.opacity = '0';
       
       // 设置初始状态（从原卡片位置开始）
@@ -1564,7 +1787,19 @@ export function EditorOverlay({ promptId, originCardId, onClose }: EditorOverlay
               }} />
 
               {/* 正文编辑区 */}
-              <div style={{ maxWidth: '1200px', flex: 1, display: 'flex', flexDirection: 'column', width: '100%', position: 'relative' }}>
+              <div 
+                style={{ maxWidth: '1200px', flex: 1, display: 'flex', flexDirection: 'column', width: '100%', position: 'relative' }}
+                onDoubleClick={(e) => {
+                  // 🔥 双击容器空白区域（不是 textarea 内部）时切换专注模式
+                  const target = e.target as HTMLElement;
+                  const isTextarea = target.tagName === 'TEXTAREA';
+                  
+                  if (!isTextarea) {
+                    e.stopPropagation();
+                    toggleFocusMode();
+                  }
+                }}
+              >
                 {/* 🔥 搜索栏 */}
                 <ContentSearchBar
                   content={content}
@@ -1579,54 +1814,162 @@ export function EditorOverlay({ promptId, originCardId, onClose }: EditorOverlay
                 
                 {/* 🔥 OpenAI 风格：点击进入编辑，失焦显示渲染 */}
                 {isEditing ? (
-                  <textarea 
-                    ref={contentTextareaRef}
-                    style={{
-                      width: '100%',
-                      flex: 1,
-                      minHeight: 0,
-                      fontSize: '16px',
-                      lineHeight: 1.7,
-                      background: 'transparent',
-                      border: 'none',
-                      outline: 'none',
-                      resize: 'none',
-                      fontFamily: 'ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace',
-                      color: theme === 'dark' ? '#e4e4e7' : '#18181b',
-                      padding: '0',
-                    }}
-                    value={content}
-                    onChange={(e) => setContent(e.target.value)}
-                    onBlur={() => setIsEditing(false)}
-                    onKeyDown={(e) => {
-                      // Tab 键插入制表符
-                      if (e.key === 'Tab') {
-                        e.preventDefault();
-                        const textarea = e.currentTarget;
-                        const start = textarea.selectionStart;
-                        const end = textarea.selectionEnd;
-                        const newContent = content.substring(0, start) + '  ' + content.substring(end);
-                        setContent(newContent);
-                        requestAnimationFrame(() => {
-                          textarea.selectionStart = textarea.selectionEnd = start + 2;
-                        });
-                      }
-                      // ESC 退出编辑
-                      if (e.key === 'Escape') {
-                        e.preventDefault();
+                  <div style={{ position: 'relative', flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+                    <textarea 
+                      ref={contentTextareaRef}
+                      style={{
+                        width: '100%',
+                        flex: 1,
+                        minHeight: 0,
+                        fontSize: '16px',
+                        lineHeight: 1.7,
+                        background: 'transparent',
+                        border: 'none',
+                        outline: 'none',
+                        resize: 'none',
+                        fontFamily: 'ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace',
+                        color: theme === 'dark' ? '#e4e4e7' : '#18181b',
+                        padding: '0',
+                      }}
+                      value={content}
+                      onChange={(e) => setContent(e.target.value)}
+                      onPaste={handlePaste}
+                      onBlur={() => {
+                        // 🔥 失去焦点时退出编辑模式，回到预览
                         setIsEditing(false);
-                      }
-                    }}
-                    placeholder="开始写作... (支持 Markdown)"
-                    autoFocus
-                  />
+                      }}
+                      onContextMenu={(e) => {
+                        // 🔥 右键菜单
+                        e.preventDefault();
+                        setContextMenu({ x: e.clientX, y: e.clientY });
+                      }}
+                      onDoubleClick={(e) => {
+                        // 🔥 阻止默认的双击全选行为，改为切换专注模式
+                        e.preventDefault();
+                        toggleFocusMode();
+                      }}
+                      onKeyDown={(e) => {
+                        // Tab 键插入制表符
+                        if (e.key === 'Tab') {
+                          e.preventDefault();
+                          const textarea = e.currentTarget;
+                          const start = textarea.selectionStart;
+                          const end = textarea.selectionEnd;
+                          const newContent = content.substring(0, start) + '  ' + content.substring(end);
+                          setContent(newContent);
+                          requestAnimationFrame(() => {
+                            textarea.selectionStart = textarea.selectionEnd = start + 2;
+                          });
+                        }
+                      }}
+                      placeholder="开始写作... (支持 Markdown)"
+                      autoFocus
+                      disabled={isUploadingImage}
+                    />
+                    
+                    {/* 🔥 图片预览层 - 显示编辑器中的图片 */}
+                    {content.match(/!\[.*?\]\((assets\/[^)]+)\)/g) && (
+                      <div style={{
+                        marginTop: '16px',
+                        padding: '12px',
+                        backgroundColor: theme === 'dark' ? 'rgba(255,255,255,0.03)' : 'rgba(0,0,0,0.02)',
+                        borderRadius: '8px',
+                        border: `1px solid ${theme === 'dark' ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)'}`,
+                      }}>
+                        <div style={{
+                          fontSize: '12px',
+                          color: theme === 'dark' ? 'rgba(255,255,255,0.5)' : 'rgba(0,0,0,0.5)',
+                          marginBottom: '8px',
+                          fontWeight: 500,
+                        }}>
+                          📷 文档中的图片 ({content.match(/!\[.*?\]\((assets\/[^)]+)\)/g)?.length || 0})
+                        </div>
+                        <div style={{
+                          display: 'flex',
+                          flexWrap: 'wrap',
+                          gap: '8px',
+                        }}>
+                          {content.match(/!\[.*?\]\((assets\/[^)]+)\)/g)?.map((match, index) => {
+                            const pathMatch = match.match(/!\[.*?\]\((assets\/[^)]+)\)/);
+                            if (!pathMatch) return null;
+                            
+                            const imagePath = pathMatch[1];
+                            const parts = imagePath.split('/');
+                            if (parts.length < 3) return null;
+                            
+                            const promptId = parts[1];
+                            const fileName = parts.slice(2).join('/');
+                            const apiBaseUrl = typeof window !== 'undefined' && window.location.port === '1420' 
+                              ? 'http://localhost:3002'
+                              : 'http://localhost:3001';
+                            const imageUrl = `${apiBaseUrl}/api/images/${promptId}/${fileName}`;
+                            
+                            return (
+                              <div
+                                key={index}
+                                style={{
+                                  position: 'relative',
+                                  width: '120px',
+                                  height: '120px',
+                                  borderRadius: '6px',
+                                  overflow: 'hidden',
+                                  border: `1px solid ${theme === 'dark' ? 'rgba(255,255,255,0.15)' : 'rgba(0,0,0,0.15)'}`,
+                                  cursor: 'pointer',
+                                  transition: 'transform 0.2s ease, box-shadow 0.2s ease',
+                                }}
+                                onMouseEnter={(e) => {
+                                  e.currentTarget.style.transform = 'scale(1.05)';
+                                  e.currentTarget.style.boxShadow = '0 4px 12px rgba(0,0,0,0.15)';
+                                }}
+                                onMouseLeave={(e) => {
+                                  e.currentTarget.style.transform = 'scale(1)';
+                                  e.currentTarget.style.boxShadow = 'none';
+                                }}
+                                onClick={() => {
+                                  // 点击图片可以在新窗口打开
+                                  window.open(imageUrl, '_blank');
+                                }}
+                              >
+                                <img
+                                  src={imageUrl}
+                                  alt="预览"
+                                  style={{
+                                    width: '100%',
+                                    height: '100%',
+                                    objectFit: 'cover',
+                                  }}
+                                />
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+                  </div>
                 ) : (
                   <div
                     ref={markdownContainerRef}
-                    onClick={() => setIsEditing(true)}
-                    onDoubleClick={(e) => {
-                      e.stopPropagation();
-                      toggleFocusMode();
+                    onClick={(e) => {
+                      // 🔥 双击检测逻辑
+                      clickCountRef.current += 1;
+                      
+                      if (clickCountRef.current === 1) {
+                        // 第一次点击：等待 300ms 看是否有第二次点击
+                        clickTimerRef.current = window.setTimeout(() => {
+                          // 300ms 后仍然只有一次点击 → 进入编辑模式
+                          setIsEditing(true);
+                          clickCountRef.current = 0;
+                        }, 300);
+                      } else if (clickCountRef.current === 2) {
+                        // 第二次点击（双击）→ 进入专注模式
+                        if (clickTimerRef.current) {
+                          clearTimeout(clickTimerRef.current);
+                          clickTimerRef.current = null;
+                        }
+                        e.stopPropagation();
+                        toggleFocusMode();
+                        clickCountRef.current = 0;
+                      }
                     }}
                     style={{
                       flex: 1,
@@ -1636,7 +1979,12 @@ export function EditorOverlay({ promptId, originCardId, onClose }: EditorOverlay
                     }}
                   >
                     {content.trim() ? (
-                      <MarkdownRenderer content={content} theme={theme} />
+                      <Suspense fallback={<div style={{ color: theme === 'dark' ? 'rgba(255,255,255,0.4)' : 'rgba(0,0,0,0.4)', fontSize: '16px' }}>加载中...</div>}>
+                        <MarkdownRenderer 
+                          content={content} 
+                          theme={theme}
+                        />
+                      </Suspense>
                     ) : (
                       <div 
                         style={{ 
@@ -1680,6 +2028,56 @@ export function EditorOverlay({ promptId, originCardId, onClose }: EditorOverlay
               }}
             />
           ))}
+        </div>,
+        document.body
+      )}
+      
+      {/* 🔥 右键菜单 */}
+      {contextMenu && typeof document !== 'undefined' && createPortal(
+        <div
+          ref={contextMenuRef}
+          style={{
+            position: 'fixed',
+            left: contextMenu.x,
+            top: contextMenu.y,
+            zIndex: 1000002,
+            backgroundColor: theme === 'dark' ? 'rgba(30,30,30,0.95)' : 'rgba(255,255,255,0.95)',
+            backdropFilter: 'blur(10px)',
+            border: `1px solid ${theme === 'dark' ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)'}`,
+            borderRadius: '8px',
+            boxShadow: theme === 'dark' 
+              ? '0 4px 12px rgba(0,0,0,0.5)' 
+              : '0 4px 12px rgba(0,0,0,0.15)',
+            padding: '4px',
+            minWidth: '160px',
+          }}
+        >
+          <button
+            onClick={() => {
+              setIsEditing(false);
+              setContextMenu(null);
+            }}
+            style={{
+              width: '100%',
+              padding: '8px 12px',
+              border: 'none',
+              background: 'transparent',
+              color: theme === 'dark' ? 'rgba(255,255,255,0.9)' : 'rgba(0,0,0,0.9)',
+              fontSize: '14px',
+              textAlign: 'left',
+              cursor: 'pointer',
+              borderRadius: '4px',
+              transition: 'background 0.15s',
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = theme === 'dark' ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.05)';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = 'transparent';
+            }}
+          >
+            切换预览
+          </button>
         </div>,
         document.body
       )}

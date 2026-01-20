@@ -38,10 +38,11 @@ const WEEK_DAYS = [
 export function RecurrenceSelector({ value, onChange, hideToggle = false }: RecurrenceSelectorProps) {
   const { theme } = useTheme();
   const [enabled, setEnabled] = useState(value?.enabled ?? false);
-  const [type, setType] = useState<'daily' | 'weekly' | 'monthly'>(value?.type ?? 'daily');
+  const [type, setType] = useState<'daily' | 'weekly' | 'monthly' | 'interval'>(value?.type ?? 'daily');
   const [weekDays, setWeekDays] = useState<number[]>(value?.weekDays ?? [1, 2, 3, 4, 5]); // 默认工作日
   const [monthDays, setMonthDays] = useState<number[]>(value?.monthDays ?? [1]);
   const [time, setTime] = useState(value?.time ?? '09:00');
+  const [intervalMinutes, setIntervalMinutes] = useState<number>(value?.intervalMinutes ?? 60);
 
   // 同步外部值
   useEffect(() => {
@@ -50,23 +51,26 @@ export function RecurrenceSelector({ value, onChange, hideToggle = false }: Recu
       setType(value.type);
       setWeekDays(value.weekDays ?? [1, 2, 3, 4, 5]);
       setMonthDays(value.monthDays ?? [1]);
-      setTime(value.time);
+      setTime(value.time || '09:00');
+      setIntervalMinutes(value.intervalMinutes ?? 60);
     }
   }, [value]);
 
   // 更新配置
   const updateConfig = (updates: Partial<{
     enabled: boolean;
-    type: 'daily' | 'weekly' | 'monthly';
+    type: 'daily' | 'weekly' | 'monthly' | 'interval';
     weekDays: number[];
     monthDays: number[];
     time: string;
+    intervalMinutes: number;
   }>) => {
     const newEnabled = updates.enabled ?? enabled;
     const newType = updates.type ?? type;
     const newWeekDays = updates.weekDays ?? weekDays;
     const newMonthDays = updates.monthDays ?? monthDays;
     const newTime = updates.time ?? time;
+    const newIntervalMinutes = updates.intervalMinutes ?? intervalMinutes;
 
     if (!newEnabled) {
       onChange(undefined);
@@ -78,6 +82,7 @@ export function RecurrenceSelector({ value, onChange, hideToggle = false }: Recu
       weekDays: newType === 'weekly' ? newWeekDays : undefined,
       monthDays: newType === 'monthly' ? newMonthDays : undefined,
       time: newTime,
+      intervalMinutes: newType === 'interval' ? newIntervalMinutes : undefined,
       enabled: newEnabled,
     });
   };
@@ -170,7 +175,7 @@ export function RecurrenceSelector({ value, onChange, hideToggle = false }: Recu
               重复频率
             </label>
             <div style={{ display: 'flex', gap: '8px' }}>
-              {(['daily', 'weekly', 'monthly'] as const).map((t) => (
+              {(['daily', 'weekly', 'monthly', 'interval'] as const).map((t) => (
                 <button
                   key={t}
                   type="button"
@@ -191,11 +196,70 @@ export function RecurrenceSelector({ value, onChange, hideToggle = false }: Recu
                     transition: 'all 0.2s',
                   }}
                 >
-                  {t === 'daily' ? '每天' : t === 'weekly' ? '每周' : '每月'}
+                  {t === 'daily' ? '每天' : t === 'weekly' ? '每周' : t === 'monthly' ? '每月' : '间隔'}
                 </button>
               ))}
             </div>
           </div>
+
+          {/* 每隔 N 分钟 */}
+          {type === 'interval' && (
+            <div>
+              <label style={{ fontSize: '12px', color: mutedColor, marginBottom: '8px', display: 'block' }}>
+                每隔（分钟）
+              </label>
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '10px',
+                  padding: '10px 14px',
+                  borderRadius: '8px',
+                  border: `1px solid ${borderColor}`,
+                  background: theme === 'dark' ? 'rgba(0,0,0,0.3)' : 'rgba(255,255,255,0.8)',
+                }}
+              >
+                <Clock size={16} style={{ color: accentColor }} />
+                <input
+                  type="number"
+                  min={1}
+                  max={1440}
+                  value={intervalMinutes}
+                  onChange={(e) => {
+                    const raw = Number(e.target.value);
+                    const next = Number.isFinite(raw) ? Math.max(1, Math.min(1440, raw)) : 1;
+                    setIntervalMinutes(next);
+                    updateConfig({ intervalMinutes: next });
+                  }}
+                  style={{
+                    width: '100px',
+                    background: 'transparent',
+                    border: 'none',
+                    outline: 'none',
+                    color: textColor,
+                    fontSize: '14px',
+                    fontFamily: 'monospace',
+                  }}
+                />
+                <span style={{ fontSize: '12px', color: mutedColor }}>分钟</span>
+              </div>
+              <div style={{
+                marginTop: '8px',
+                padding: '8px 12px',
+                borderRadius: '6px',
+                background: theme === 'dark' ? 'rgba(251, 191, 36, 0.1)' : 'rgba(251, 191, 36, 0.1)',
+                border: `1px solid ${theme === 'dark' ? 'rgba(251, 191, 36, 0.3)' : 'rgba(251, 191, 36, 0.3)'}`,
+              }}>
+                <span style={{ 
+                  fontSize: '11px', 
+                  color: theme === 'dark' ? 'rgba(251, 191, 36, 0.9)' : 'rgba(180, 83, 9, 0.9)',
+                  lineHeight: '1.5',
+                }}>
+                  ⚠️ 注意：应用关闭或刷新后，该任务将失效，不会补发通知
+                </span>
+              </div>
+            </div>
+          )}
 
           {/* 每周选择 */}
           {type === 'weekly' && (
@@ -267,6 +331,7 @@ export function RecurrenceSelector({ value, onChange, hideToggle = false }: Recu
           )}
 
           {/* 触发时间 */}
+          {type !== 'interval' && (
           <div>
             <label style={{ fontSize: '12px', color: mutedColor, marginBottom: '8px', display: 'block' }}>
               提醒时间
@@ -310,6 +375,7 @@ export function RecurrenceSelector({ value, onChange, hideToggle = false }: Recu
               />
             </div>
           </div>
+          )}
 
           {/* 预览 */}
           <div style={{
@@ -321,7 +387,7 @@ export function RecurrenceSelector({ value, onChange, hideToggle = false }: Recu
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
               <Calendar size={14} style={{ color: accentColor }} />
               <span style={{ fontSize: '12px', color: accentColor, fontWeight: 500 }}>
-                {getRecurrenceDescription({ type, weekDays, monthDays, time, enabled })}
+                {getRecurrenceDescription({ type, weekDays, monthDays, time, intervalMinutes, enabled })}
               </span>
             </div>
           </div>
@@ -352,6 +418,8 @@ function getRecurrenceDescription(config: RecurrenceConfig): string {
       }
       const days = config.monthDays.join('、');
       return `每月 ${days} 日 ${timeStr} 提醒`;
+    case 'interval':
+      return `每隔 ${Math.max(1, config.intervalMinutes ?? 1)} 分钟提醒`;
     default:
       return '未知规则';
   }

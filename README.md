@@ -1,6 +1,6 @@
-# Local Prompt Notion - 本地提示词管理系统
+# Lumina - 本地优先的 AI 卡片与任务工作台
 
-> 一个功能完整的本地提示词(Prompt)管理系统，结合 Notion 风格的现代化 UI，支持分类、搜索、收藏、回收站等功能。现已支持浅色/深色主题切换、确定性标签颜色系统、树形分类下拉选择器等 Pro Max 级别的用户体验。
+> Lumina 是一款本地优先的 AI 卡片与任务工作台，用来沉淀提示词、想法与问题，并通过搜索与计划提醒快速复用。结合 Notion 风格的现代化 UI，支持分类、搜索、收藏、回收站等功能，提供顺滑的交互与体验。
 
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](#license)
 [![Node](https://img.shields.io/badge/node-%3E%3D16-brightgreen)](#getting-started)
@@ -31,7 +31,7 @@
 
 ## About The Project
 
-Local Prompt Notion 是一个全栈应用,用于组织、管理和使用 AI 提示词(Prompts)。提供类似 Notion 的优雅界面,同时确保所有数据保存在本地文件系统中。
+Lumina 是一个全栈本地应用，用于沉淀与复用 AI 相关内容卡片（提示词/思路/问题等），并通过任务系统帮助你按计划执行。提供类似 Notion 的优雅界面，同时确保所有数据保存在本地文件系统中。
 
 ### 核心特性
 
@@ -283,12 +283,12 @@ npm run tauri build
 **生成文件位置：**
 ```
 src-tauri/target/release/
-├── promptmanager.exe                                    # 绿色版（免安装）
+├── lumina.exe                                           # 绿色版（免安装）
 └── bundle/
     ├── msi/
-    │   └── PromptManager_1.0.0_x64_en-US.msi           # MSI 安装包
+    │   └── Lumina_1.0.0_x64_en-US.msi                  # MSI 安装包
     └── nsis/
-        └── PromptManager_1.0.0_x64-setup.exe           # NSIS 安装包
+        └── Lumina_1.0.0_x64-setup.exe                  # NSIS 安装包
 ```
 
 **桌面应用特性**:
@@ -298,7 +298,7 @@ src-tauri/target/release/
 - 支持绿色版(免安装)和安装包两种分发方式
 - 数据存储在可执行文件旁边的 `vault/` 目录
 
-**详细说明**：参见 [桌面应用构建指南](./docs/desktop-build-guide.md)
+**详细说明**：本文档已包含完整构建流程说明。
 
 ## Usage
 

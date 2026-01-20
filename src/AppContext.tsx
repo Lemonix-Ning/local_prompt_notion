@@ -6,6 +6,7 @@
 import React, { createContext, useContext, useReducer, ReactNode, useRef, useCallback } from 'react';
 import { AppState, AppAction, PromptData, FileSystemState, CategoryNode } from './types';
 import { IFileSystemAdapter } from './types';
+import { getRecentCategory } from './utils/recentCategory';
 
 /**
  * 增量更新文件系统状态中的分类位置
@@ -133,7 +134,7 @@ function joinCategoryPath(parentPath: string, name: string): string {
  */
 const initialState: AppState = {
   fileSystem: null,
-  selectedCategory: null,
+  selectedCategory: getRecentCategory(), // 🚀 Performance: Load recent category on startup
   selectedPromptId: null,
   isEditing: false,
   searchQuery: '',
@@ -389,7 +390,8 @@ export function AppProvider({ children, adapter }: AppProviderProps) {
       const fileSystem = await adapter.scanVault(lastRootPathRef.current);
       dispatch({ type: 'LOAD_VAULT', payload: fileSystem });
     } catch (error) {
-      // Error refreshing vault
+      // Re-throw error so callers can handle it appropriately
+      throw error;
     }
   }, [adapter]);
 
@@ -602,6 +604,10 @@ export function AppProvider({ children, adapter }: AppProviderProps) {
     // 特殊分类过滤:回收站
     else if (state.selectedCategory === 'trash') {
       prompts = prompts.filter(prompt => isInTrash(prompt.path));
+    }
+    // 特殊分类过滤:全部（显示所有非回收站的提示词）
+    else if (state.selectedCategory === 'all') {
+      prompts = prompts.filter(prompt => !isInTrash(prompt.path));
     }
     // 按分类过滤
     else if (state.selectedCategory) {

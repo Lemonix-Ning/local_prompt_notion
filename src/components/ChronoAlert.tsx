@@ -4,11 +4,12 @@
  * 
  * 设计理念：
  * - Top-Center Floating: 顶部居中悬浮，既显眼又不遮挡主内容
- * - Persistence: 不会自动消失，必须用户处理
+ * - Auto-Dismiss: 5 秒后自动关闭（用户也可以手动关闭）
  * - Focus Entry: 点击后直接进入专注模式（定位+高亮）
  */
 
 import { Bell, X, Zap, Target } from 'lucide-react';
+import { useEffect } from 'react';
 import { PromptData } from '../types';
 
 interface ChronoAlertProps {
@@ -18,8 +19,16 @@ interface ChronoAlertProps {
 }
 
 export const ChronoAlert = ({ task, onFocus, onDismiss }: ChronoAlertProps) => {
+  // 🔥 5 秒后自动关闭
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      onDismiss();
+    }, 5000);
+
+    return () => clearTimeout(timer);
+  }, [onDismiss]);
   return (
-    <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[999999] animate-slide-down">
+    <div className="fixed top-4 left-1/2 z-[999999] animate-slide-down">
       {/* 外层光晕 */}
       <div className="absolute inset-0 bg-rose-500/20 rounded-full blur-xl animate-pulse" />
       

@@ -16,11 +16,13 @@
  * - 分割线
  */
 
+import { memo, useRef, useEffect } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeHighlight from 'rehype-highlight';
 import { Copy, Check } from 'lucide-react';
 import { useState, useCallback } from 'react';
+import { LazyLoadManager } from '../utils/lazyLoad';
 
 // 导入 highlight.js 样式（在 index.css 中会覆盖）
 import 'highlight.js/styles/github-dark.css';
@@ -153,7 +155,76 @@ function CodeBlock({
   );
 }
 
-export function MarkdownRenderer({ content, theme, className }: MarkdownRendererProps) {
+// 懒加载图片组件
+function LazyImage({ src, alt }: { src?: string; alt?: string }) {
+  const [isLoaded, setIsLoaded] = useState(false);
+  const [isVisible, setIsVisible] = useState(false);
+  const imgRef = useRef<HTMLImageElement>(null);
+  const managerRef = useRef<LazyLoadManager | null>(null);
+
+  useEffect(() => {
+    // Initialize lazy load manager
+    managerRef.current = new LazyLoadManager({ rootMargin: '200px', threshold: 0.01 });
+
+    // Start observing the image
+    if (imgRef.current && src) {
+      managerRef.current.observe(imgRef.current, () => {
+        setIsVisible(true);
+      });
+    }
+
+    return () => {
+      if (managerRef.current) {
+        managerRef.current.disconnect();
+      }
+    };
+  }, [src]);
+
+  // 🔥 处理本地图片路径
+  const getImageSrc = () => {
+    if (!src) return undefined;
+    
+    // 如果是 assets/ 开头的相对路径，转换为 API 路径
+    if (src.startsWith('assets/')) {
+      const apiBaseUrl = typeof window !== 'undefined' && window.location.port === '1420' 
+        ? 'http://localhost:3002'
+        : 'http://localhost:3001';
+      
+      // 提取 promptId 和 fileName
+      // 格式: assets/promptId/fileName
+      const parts = src.split('/');
+      if (parts.length >= 3) {
+        const promptId = parts[1];
+        const fileName = parts.slice(2).join('/');
+        return `${apiBaseUrl}/api/images/${promptId}/${fileName}`;
+      }
+    }
+    
+    // 其他情况直接返回原始 src
+    return src;
+  };
+
+  return (
+    <img
+      ref={imgRef}
+      src={isVisible ? getImageSrc() : undefined}
+      alt={alt || ''}
+      onLoad={() => setIsLoaded(true)}
+      style={{
+        maxWidth: '100%',
+        borderRadius: '8px',
+        marginTop: '8px',
+        marginBottom: '8px',
+        opacity: isLoaded ? 1 : 0.5,
+        transition: 'opacity 0.3s ease-in-out',
+        backgroundColor: 'rgba(128, 128, 128, 0.1)',
+        minHeight: isVisible && !isLoaded ? '200px' : undefined,
+      }}
+    />
+  );
+}
+
+const MarkdownRendererComponent = ({ content, theme, className }: MarkdownRendererProps) => {
   return (
     <div 
       className={`markdown-body ${className || ''}`}
@@ -311,19 +382,8 @@ export function MarkdownRenderer({ content, theme, className }: MarkdownRenderer
             </a>
           ),
           
-          // 图片
-          img: ({ src, alt }) => (
-            <img
-              src={src}
-              alt={alt || ''}
-              style={{
-                maxWidth: '100%',
-                borderRadius: '8px',
-                marginTop: '8px',
-                marginBottom: '8px',
-              }}
-            />
-          ),
+          // 图片 - 使用懒加载
+          img: ({ src, alt }) => <LazyImage src={src} alt={alt} />,
           
           // 无序列表
           ul: ({ children }) => (
@@ -452,4 +512,16 @@ export function MarkdownRenderer({ content, theme, className }: MarkdownRenderer
       </ReactMarkdown>
     </div>
   );
-}
+};
+
+// Memoize MarkdownRenderer to prevent unnecessary re-renders
+// Only re-render when content or theme changes
+export const MarkdownRenderer = memo(MarkdownRendererComponent, (prevProps, nextProps) => {
+  return (
+    prevProps.content === nextProps.content &&
+    prevProps.theme === nextProps.theme &&
+    prevProps.className === nextProps.className
+  );
+});
+
+MarkdownRenderer.displayName = 'MarkdownRenderer';

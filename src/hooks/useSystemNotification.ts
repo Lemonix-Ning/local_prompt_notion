@@ -9,16 +9,32 @@
  * - 任务到期提醒
  */
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, useRef } from 'react';
+import { NotificationThrottler } from '../utils/notificationThrottler';
 
 // 检测是否在 Tauri 环境
 const isTauri = () => {
-  return typeof window !== 'undefined' && '__TAURI__' in window;
+  if (typeof window === 'undefined') return false;
+
+  if ('__TAURI_INTERNALS__' in window || '__TAURI__' in window) return true;
+
+  // 额外检测：检查 Tauri 的 IPC 协议
+  if (
+    window.location.protocol === 'tauri:' ||
+    (window.location.protocol === 'https:' && window.location.hostname === 'tauri.localhost')
+  ) {
+    return true;
+  }
+
+  return false;
 };
 
 export function useSystemNotification() {
   const [permissionGranted, setPermissionGranted] = useState(false);
   const [isSupported, setIsSupported] = useState(false);
+  
+  // Notification throttler to prevent spam (max 1 notification per 10s per task)
+  const throttlerRef = useRef<NotificationThrottler>(new NotificationThrottler({ throttleInterval: 10000 }));
 
   // 初始化通知 API
   useEffect(() => {
@@ -52,6 +68,7 @@ export function useSystemNotification() {
         
         setPermissionGranted(granted);
       } catch (error) {
+        console.error('[notification] failed to init tauri notification plugin', error);
         // 回退到 Web Notification API
         if ('Notification' in window) {
           setIsSupported(true);
@@ -98,6 +115,17 @@ export function useSystemNotification() {
 
     try {
       if (isTauri()) {
+        if (!permissionGranted) {
+          try {
+            const { requestPermission } = await import('@tauri-apps/plugin-notification');
+            const permission = await requestPermission();
+            const granted = permission === 'granted';
+            setPermissionGranted(granted);
+            if (!granted) return false;
+          } catch {
+            return false;
+          }
+        }
         // 🔥 Tauri 2.x 使用 sendNotification 函数
         const { sendNotification: tauriSendNotification } = await import('@tauri-apps/plugin-notification');
         tauriSendNotification({ title, body });
@@ -105,23 +133,47 @@ export function useSystemNotification() {
       }
 
       // Web Notification API
-      if ('Notification' in window && permissionGranted) {
+      if ('Notification' in window) {
+        if (!permissionGranted) {
+          const permission = await Notification.requestPermission();
+          const granted = permission === 'granted';
+          setPermissionGranted(granted);
+          if (!granted) return false;
+        }
         new Notification(title, { body });
         return true;
       }
     } catch (error) {
-      // Failed to send notification
+      console.error('[notification] failed to send notification', error);
     }
 
     return false;
   }, [isSupported, permissionGranted]);
 
-  // 发送任务提醒通知
-  const sendTaskReminder = useCallback(async (taskTitle: string, isExpired: boolean = false) => {
-    const title = isExpired ? '⏰ 任务已到期' : '⏰ 任务即将到期';
+  // 发送任务提醒通知（带节流）
+  const sendTaskReminder = useCallback(async (
+    taskId: string,
+    taskTitle: string, 
+    isExpired: boolean = false, 
+    isRecurring: boolean = false
+  ) => {
+    // Check throttle - prevent notification spam
+    if (!throttlerRef.current.shouldShowNotification(taskId)) {
+      const timeRemaining = throttlerRef.current.getTimeUntilNextNotification(taskId);
+      console.log(`[notification] Throttled notification for task "${taskTitle}" (${Math.ceil(timeRemaining / 1000)}s remaining)`);
+      return false;
+    }
+
+    // 🔥 修复：重复任务显示"已到期"而不是"即将到期"
+    const title = (isExpired || isRecurring) ? '⏰ 任务已到期' : '⏰ 任务即将到期';
     const body = taskTitle;
     return sendNotification(title, body);
   }, [sendNotification]);
+
+  // Reset throttle for a specific task (call when task is dismissed or completed)
+  const resetTaskThrottle = useCallback((taskId: string) => {
+    throttlerRef.current.reset(taskId);
+  }, []);
 
   return {
     isSupported,
@@ -129,5 +181,6 @@ export function useSystemNotification() {
     requestPermission: requestPermissionFn,
     sendNotification,
     sendTaskReminder,
+    resetTaskThrottle,
   };
 }

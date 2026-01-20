@@ -503,9 +503,8 @@ export class MockFileSystemAdapter implements IFileSystemAdapter {
     return promptData;
   }
 
-  async createCategory(parentPath: string, name: string): Promise<void> {
+  async createCategory(_parentPath: string, _name: string): Promise<void> {
     // 模拟实现
-    console.log(`Creating category: ${parentPath}/${name}`);
   }
 
   async renameCategory(_categoryPath: string, _newName: string): Promise<void> {

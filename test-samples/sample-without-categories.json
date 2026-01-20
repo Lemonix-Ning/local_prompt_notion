@@ -1,0 +1,14 @@
+[
+  {
+    "title": "Prompt Without Category 1",
+    "content": "This prompt has no category_path field",
+    "tags": ["test"],
+    "type": "NOTE"
+  },
+  {
+    "title": "Prompt Without Category 2",
+    "content": "This prompt also has no category_path field",
+    "tags": ["sample"],
+    "type": "NOTE"
+  }
+]

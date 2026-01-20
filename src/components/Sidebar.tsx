@@ -5,13 +5,15 @@
 
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
-import { ChevronRight, Plus, Star, Book, Trash2, Folder, FolderOpen, Edit2, Settings, Sun, Moon, Check, X, FileText, Download } from 'lucide-react';
+import { ChevronRight, Plus, Star, Book, Trash2, Folder, FolderOpen, Edit2, Settings, Sun, Moon, FileText, Download } from 'lucide-react';
+import { enable as enableAutostart, disable as disableAutostart, isEnabled as isAutostartEnabled } from '@tauri-apps/plugin-autostart';
 import { CategoryNode } from '../types';
 import { useApp } from '../AppContext';
 import { ExportPromptsDialog } from './ExportPromptsDialog';
 import { useTheme } from '../contexts/ThemeContext';
 import { useToast } from '../contexts/ToastContext';
 import { ElasticScroll } from './ElasticScroll';
+import { saveRecentCategory } from '../utils/recentCategory';
 import { analyzeCategoryContent, CategoryContentInfo } from '../utils/categoryContentAnalyzer';
 import { DeleteCategoryDialog, DeleteOptions } from './DeleteCategoryDialog';
 
@@ -130,72 +132,145 @@ function ConfirmDialog({
   );
 }
 
-// 设置面板
+// 设置抽屉 (Settings Drawer)
 interface SettingsPanelProps {
   isOpen: boolean;
   onClose: () => void;
 }
 
-function SettingsPanel({ isOpen, onClose }: SettingsPanelProps) {
-  const { theme, setTheme } = useTheme();
+function SettingsPanel({
+  isOpen,
+  onClose,
+}: SettingsPanelProps) {
+  const { showToast } = useToast();
+  const [autostartEnabled, setAutostartEnabled] = useState<boolean>(false);
+  const [autostartLoading, setAutostartLoading] = useState<boolean>(false);
 
-  if (!isOpen) return null;
+  useEffect(() => {
+    if (!isOpen) return;
+    let mounted = true;
+    (async () => {
+      try {
+        const enabled = await isAutostartEnabled();
+        if (mounted) setAutostartEnabled(enabled);
+      } catch {
+        if (mounted) setAutostartEnabled(false);
+      }
+    })();
 
-  const handleThemeChange = (newTheme: 'dark' | 'light') => {
-    setTheme(newTheme);
+    return () => {
+      mounted = false;
+    };
+  }, [isOpen]);
+
+  const handleToggleAutostart = async () => {
+    if (!isOpen) return;
+    if (autostartLoading) return;
+
+    setAutostartLoading(true);
+    try {
+      if (autostartEnabled) {
+        await disableAutostart();
+        setAutostartEnabled(false);
+        showToast('已关闭开机自启动', 'success');
+      } else {
+        await enableAutostart();
+        setAutostartEnabled(true);
+        showToast('已开启开机自启动', 'success');
+      }
+    } catch {
+      showToast('设置开机自启动失败', 'error');
+      try {
+        const enabled = await isAutostartEnabled();
+        setAutostartEnabled(enabled);
+      } catch {
+      }
+    } finally {
+      setAutostartLoading(false);
+    }
   };
 
   return (
-    <div className="fixed inset-0 bg-black/40 dark:bg-black/60 backdrop-blur-sm z-[100000] flex items-center justify-center p-4">
-      <div className="bg-popover/95 backdrop-blur-xl border border-border rounded-xl shadow-2xl w-full max-w-md">
-        <div className="flex items-center justify-between p-6 border-b border-border">
-          <h3 className="text-lg font-semibold text-foreground">设置</h3>
-          <button
-            onClick={onClose}
-            className="p-1 hover:bg-accent rounded-lg transition-colors"
-          >
-            <X size={18} className="text-muted-foreground" />
-          </button>
+    <>
+      {/* 透明遮罩层 - 覆盖整个屏幕，点击任何外部区域关闭 */}
+      {isOpen && createPortal(
+        <div 
+          className="fixed inset-0 z-[50]" 
+          onClick={onClose}
+        />,
+        document.body
+      )}
+      
+      {/* 抽屉本体 - 使用 Portal 渲染到 body，确保在遮罩层之上 */}
+      {createPortal(
+        <div
+          className={`fixed left-0 right-0 z-[60] bg-background/95 dark:bg-zinc-900/95 backdrop-blur-xl border-t border-border/50 shadow-[0_-10px_40px_rgba(0,0,0,0.3)] ${
+            isOpen ? 'translate-y-0 opacity-100 pointer-events-auto' : 'translate-y-[110%] opacity-0 pointer-events-none'
+          }`}
+          style={{
+            bottom: '120px', // 设置按钮区域高度约 120px，抽屉从其上方滑出
+            transformOrigin: 'bottom',
+            transition: 'transform 0.4s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.3s ease',
+            maxHeight: 'calc(100vh - 200px)', // 留出顶部和底部空间
+            width: '256px', // 固定宽度，与侧边栏对齐
+          }}
+          onClick={(e) => e.stopPropagation()} // 防止点击抽屉内部关闭
+        >
+        <div className="flex items-center justify-between px-3 py-2 border-b border-border">
+          <h3 className="text-sm font-semibold text-foreground">设置</h3>
         </div>
-        
-        <div className="p-6 space-y-6">
-          <div>
-            <h4 className="text-sm font-medium text-foreground mb-3">主题</h4>
-            <div className="space-y-2">
-              <button
-                onClick={() => handleThemeChange('dark')}
-                className={`w-full flex items-center justify-between p-3 rounded-lg border transition-colors ${
-                  theme === 'dark' 
-                    ? 'border-primary bg-primary/10' 
-                    : 'border-border hover:bg-accent'
-                }`}
-              >
-                <div className="flex items-center gap-3">
-                  <Moon size={16} className="text-muted-foreground" />
-                  <span className="text-sm text-foreground">深色主题</span>
-                </div>
-                {theme === 'dark' && <Check size={16} className="text-primary" />}
-              </button>
-              
-              <button
-                onClick={() => handleThemeChange('light')}
-                className={`w-full flex items-center justify-between p-3 rounded-lg border transition-colors ${
-                  theme === 'light' 
-                    ? 'border-primary bg-primary/10' 
-                    : 'border-border hover:bg-accent'
-                }`}
-              >
-                <div className="flex items-center gap-3">
-                  <Sun size={16} className="text-muted-foreground" />
-                  <span className="text-sm text-foreground">浅色主题</span>
-                </div>
-                {theme === 'light' && <Check size={16} className="text-primary" />}
-              </button>
+
+        <div className="p-3 space-y-3" style={{ maxHeight: 'calc(100vh - 280px)', overflowY: 'auto' }}>
+          {/* 启动配置 */}
+          <div className="space-y-2">
+            <div className="flex items-center gap-2 px-1">
+              <div className="w-1 h-3 bg-primary rounded-full" />
+              <h4 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">启动</h4>
             </div>
+            
+            <button
+              onClick={handleToggleAutostart}
+              disabled={autostartLoading}
+              className={`w-full group relative overflow-hidden rounded-lg transition-all duration-200 ${
+                autostartEnabled
+                  ? 'bg-primary/10 hover:bg-primary/15 border border-primary/30'
+                  : 'bg-accent/50 hover:bg-accent border border-border'
+              } ${autostartLoading ? 'opacity-60 cursor-not-allowed' : 'cursor-pointer'}`}
+            >
+              <div className="flex items-center justify-between p-3">
+                <div className="flex items-center gap-3">
+                  <div className={`p-2 rounded-lg transition-colors ${
+                    autostartEnabled ? 'bg-primary/20' : 'bg-muted'
+                  }`}>
+                    <Settings size={16} className={autostartEnabled ? 'text-primary' : 'text-muted-foreground'} />
+                  </div>
+                  <div className="flex flex-col items-start">
+                    <span className="text-sm font-medium text-foreground">开机自启动</span>
+                    <span className="text-xs text-muted-foreground">随系统启动应用</span>
+                  </div>
+                </div>
+                
+                {/* Toggle Switch */}
+                <div className={`relative w-11 h-6 rounded-full transition-colors duration-200 ${
+                  autostartEnabled ? 'bg-primary' : 'bg-muted'
+                }`}>
+                  <div className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow-sm transition-transform duration-200 ${
+                    autostartEnabled ? 'translate-x-5' : 'translate-x-0'
+                  }`} />
+                </div>
+              </div>
+              
+              {/* Shine effect on hover */}
+              <div className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none">
+                <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/5 to-transparent -translate-x-full group-hover:translate-x-full transition-transform duration-700" />
+              </div>
+            </button>
           </div>
         </div>
-      </div>
-    </div>
+        </div>,
+        document.body
+      )}
+    </>
   );
 }
 
@@ -322,10 +397,16 @@ export function Sidebar() {
   }>({ isOpen: false, originId: '', categoryPath: '', categoryName: '', contentInfo: null });
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [rootContextMenu, setRootContextMenu] = useState<{ x: number; y: number } | null>(null);
-  const [exportCategoryPath, setExportCategoryPath] = useState<string | null>(null);
-  const [exportCategoryOriginId, setExportCategoryOriginId] = useState<string>('category-export');
-  const [exportDialogMounted, setExportDialogMounted] = useState(false);
+  
+  // 导出对话框状态（完整动画支持 - 与删除对话框相同的模式）
+  const [exportDialog, setExportDialog] = useState<{
+    isOpen: boolean;
+    originId: string;
+    categoryPath: string | null;
+  }>({ isOpen: false, originId: '', categoryPath: null });
+  
   const newCategoryInputRef = useRef<HTMLInputElement>(null);
+  const sidebarRef = useRef<HTMLDivElement>(null);
 
   // Resizable Sidebar State
   const [sidebarWidth, setSidebarWidth] = useState(256);
@@ -522,9 +603,19 @@ export function Sidebar() {
   };
 
   const handleExportCategory = (categoryPath: string, originId: string) => {
-    setExportCategoryOriginId(originId);
-    setExportCategoryPath(categoryPath);
-    setExportDialogMounted(true);
+    setExportDialog({
+      isOpen: true,
+      originId,
+      categoryPath,
+    });
+  };
+
+  const handleExportClose = () => {
+    setExportDialog((prev) => ({ ...prev, isOpen: false }));
+  };
+
+  const handleExportClosed = () => {
+    setExportDialog({ isOpen: false, originId: '', categoryPath: null });
   };
 
   const handleNewCategoryKeyDown = (e: React.KeyboardEvent) => {
@@ -645,16 +736,19 @@ export function Sidebar() {
   const handleViewAll = () => {
     setViewMode('all');
     dispatch({ type: 'SELECT_CATEGORY', payload: null });
+    saveRecentCategory('all'); // 🚀 Performance: Save recent category
   };
 
   const handleViewFavorites = () => {
     setViewMode('favorites');
     dispatch({ type: 'SELECT_CATEGORY', payload: 'favorites' });
+    saveRecentCategory('favorites'); // 🚀 Performance: Save recent category
   };
 
   const handleViewTrash = () => {
     setViewMode('trash');
     dispatch({ type: 'SELECT_CATEGORY', payload: 'trash' });
+    saveRecentCategory('trash'); // 🚀 Performance: Save recent category
   };
 
   const isSidebarOpen = uiState.sidebarOpen;
@@ -668,6 +762,7 @@ export function Sidebar() {
   return (
     <>
       <div
+        ref={sidebarRef}
         className="notion-sidebar backdrop-blur-xl flex flex-col relative"
         data-tauri-drag-region={false}
         style={{
@@ -685,8 +780,8 @@ export function Sidebar() {
       >
         {/* Workspace Header */}
         <div className="p-3 mx-2 mt-2 hover:bg-accent rounded-lg cursor-pointer transition-colors flex items-center gap-2 mb-2">
-          <div className="w-5 h-5 bg-gradient-to-br from-foreground to-muted-foreground rounded flex items-center justify-center text-background text-xs font-bold shadow-sm">P</div>
-          <span className="text-sm font-medium text-foreground truncate">Prompt Workspace</span>
+          <div className="w-5 h-5 bg-gradient-to-br from-foreground to-muted-foreground rounded flex items-center justify-center text-background text-xs font-bold shadow-sm">L</div>
+          <span className="text-sm font-medium text-foreground truncate">Lumina</span>
           <div className="ml-auto text-muted-foreground"><Settings size={12}/></div>
         </div>
 
@@ -695,134 +790,143 @@ export function Sidebar() {
           className="flex-1 px-2 space-y-0.5 flex flex-col min-h-0"
           onContextMenu={handleLibraryContextMenu}
         >
-          <SidebarItem 
-            icon={Book} 
-            label="全部" 
-            active={viewMode === 'all' && selectedCategory === null} 
-            onClick={handleViewAll} 
-            count={normalPrompts.length}
-          />
-          <SidebarItem 
-            icon={Star} 
-            label="收藏" 
-            active={viewMode === 'favorites'}
-            onClick={handleViewFavorites}
-            count={favoriteCount}
-          />
-          <SidebarItem 
-            icon={Trash2} 
-            label="回收站" 
-            active={viewMode === 'trash'}
-            onClick={handleViewTrash}
-            count={trashCount}
-          />
-          
-          <div 
-            className="mt-6 px-3 text-xs font-semibold notion-sidebar-text-muted mb-2 uppercase tracking-wider"
-          >
-            LIBRARY
-          </div>
-          
-          {/* 分类列表容器 - 使用 flex-1 撑满剩余空间，确保右键区域覆盖 */}
-          <div 
-            className={`flex-1 space-y-0.5 min-h-0 ${isDroppingToRoot ? 'ring-2 ring-primary/30 rounded-lg' : ''}`}
-            onContextMenu={handleLibraryContextMenu}
-            onDragOver={(e) => {
-              e.preventDefault();
-              e.stopPropagation();
-              if (!fileSystem) return;
-              setIsDroppingToRoot(true);
-            }}
-            onDragLeave={(e) => {
-              e.preventDefault();
-              e.stopPropagation();
-              // 只有当鼠标真正离开根目录区域时才清除状态
-              const rect = e.currentTarget.getBoundingClientRect();
-              const x = e.clientX;
-              const y = e.clientY;
+              <SidebarItem 
+                icon={Book} 
+                label="全部" 
+                active={viewMode === 'all' && selectedCategory === null} 
+                onClick={handleViewAll} 
+                count={normalPrompts.length}
+              />
+              <SidebarItem 
+                icon={Star} 
+                label="收藏" 
+                active={viewMode === 'favorites'}
+                onClick={handleViewFavorites}
+                count={favoriteCount}
+              />
+              <SidebarItem 
+                icon={Trash2} 
+                label="回收站" 
+                active={viewMode === 'trash'}
+                onClick={handleViewTrash}
+                count={trashCount}
+              />
               
-              if (x < rect.left || x > rect.right || y < rect.top || y > rect.bottom) {
-                setIsDroppingToRoot(false);
-              }
-            }}
-            onDrop={(e) => {
-              e.preventDefault();
-              e.stopPropagation();
-              setIsDroppingToRoot(false); // 立即清除状态
-              if (!fileSystem) return;
-              const sourcePath = e.dataTransfer.getData('text/plain');
-              if (!sourcePath) return;
-              handleMoveCategory(sourcePath, fileSystem.root);
-            }}
-            data-tauri-drag-region={false}
-          >
-            {/* 分类列表 */}
-            {fileSystem?.categories
-              .filter(category => !category.name.toLowerCase().includes('trash'))
-              .map(category => (
-                <CategoryItem
-                  key={category.path}
-                  category={category}
-                  selectedPath={selectedCategory}
-                  onSelect={(path) => {
-                    handlePinChain(path);
-                    dispatch({ type: 'SELECT_CATEGORY', payload: path });
-                  }}
-                  onRename={renameCategory}
-                  onDelete={handleDeleteWithConfirm}
-                  onCreateSubCategory={handleStartCreateCategory}
-                  onNewPrompt={handleNewPromptFromCategory}
-                  onMove={handleMoveCategory}
-                  onExport={handleExportCategory}
-                  rootPath={fileSystem.root}
-                  isCreatingCategory={isCreatingCategory}
-                  newCategoryParent={newCategoryParent}
-                  newCategoryName={newCategoryName}
-                  setNewCategoryName={setNewCategoryName}
-                  onCreateCategory={handleCreateCategory}
-                  onCancelCreateCategory={handleCancelCreateCategory}
-                  onNewCategoryKeyDown={handleNewCategoryKeyDown}
-                  newCategoryInputRef={newCategoryInputRef}
-                  showToast={showToast}
-                  isExpanded={isPathExpanded(category.path)}
-                  isPathExpanded={isPathExpanded}
-                  onTogglePinnedExpand={handleTogglePinnedExpand}
-                />
-              ))
-            }
-
-            {/* 根目录新建分类输入框 */}
-            {isCreatingCategory && !newCategoryParent && (
-              <div className="flex items-center gap-2 px-2 py-1.5 text-sm rounded-md bg-accent border border-border">
-                <div className="w-4" /> {/* 箭头占位 */}
-                <Folder size={16} className="notion-sidebar-folder flex-shrink-0" />
-                <input
-                  ref={newCategoryInputRef}
-                  type="text"
-                  value={newCategoryName}
-                  onChange={(e) => setNewCategoryName(e.target.value)}
-                  onKeyDown={handleNewCategoryKeyDown}
-                  onBlur={handleCreateCategory}
-                  placeholder="输入分类名称..."
-                  className="flex-1 bg-transparent notion-sidebar-text-primary placeholder:notion-sidebar-text-muted outline-none"
-                />
+              <div 
+                className="mt-6 px-3 text-xs font-semibold notion-sidebar-text-muted mb-2 uppercase tracking-wider"
+              >
+                资源库
               </div>
-            )}
-          </div>
-        </ElasticScroll>
-        
+              
+              {/* 分类列表容器 - 使用 flex-1 撑满剩余空间，确保右键区域覆盖 */}
+              <div 
+                className={`flex-1 space-y-0.5 min-h-0 ${isDroppingToRoot ? 'ring-2 ring-primary/30 rounded-lg' : ''}`}
+                onContextMenu={handleLibraryContextMenu}
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  if (!fileSystem) return;
+                  setIsDroppingToRoot(true);
+                }}
+                onDragLeave={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  // 只有当鼠标真正离开根目录区域时才清除状态
+                  const rect = e.currentTarget.getBoundingClientRect();
+                  const x = e.clientX;
+                  const y = e.clientY;
+                  
+                  if (x < rect.left || x > rect.right || y < rect.top || y > rect.bottom) {
+                    setIsDroppingToRoot(false);
+                  }
+                }}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setIsDroppingToRoot(false); // 立即清除状态
+                  if (!fileSystem) return;
+                  const sourcePath = e.dataTransfer.getData('text/plain');
+                  if (!sourcePath) return;
+                  handleMoveCategory(sourcePath, fileSystem.root);
+                }}
+                data-tauri-drag-region={false}
+              >
+                {/* 分类列表 */}
+                {fileSystem?.categories
+                  .filter(category => !category.name.toLowerCase().includes('trash'))
+                  .map(category => (
+                    <CategoryItem
+                      key={category.path}
+                      category={category}
+                      selectedPath={selectedCategory}
+                      onSelect={(path) => {
+                        handlePinChain(path);
+                        dispatch({ type: 'SELECT_CATEGORY', payload: path });
+                        saveRecentCategory(path); // 🚀 Performance: Save recent category
+                      }}
+                      onRename={renameCategory}
+                      onDelete={handleDeleteWithConfirm}
+                      onCreateSubCategory={handleStartCreateCategory}
+                      onNewPrompt={handleNewPromptFromCategory}
+                      onMove={handleMoveCategory}
+                      onExport={(categoryPath, originId) => handleExportCategory(categoryPath, originId)}
+                      rootPath={fileSystem.root}
+                      isCreatingCategory={isCreatingCategory}
+                      newCategoryParent={newCategoryParent}
+                      newCategoryName={newCategoryName}
+                      setNewCategoryName={setNewCategoryName}
+                      onCreateCategory={handleCreateCategory}
+                      onCancelCreateCategory={handleCancelCreateCategory}
+                      onNewCategoryKeyDown={handleNewCategoryKeyDown}
+                      newCategoryInputRef={newCategoryInputRef}
+                      showToast={showToast}
+                      isExpanded={isPathExpanded(category.path)}
+                      isPathExpanded={isPathExpanded}
+                      onTogglePinnedExpand={handleTogglePinnedExpand}
+                    />
+                  ))
+                }
+
+                {/* 根目录新建分类输入框 */}
+                {isCreatingCategory && !newCategoryParent && (
+                  <div className="flex items-center gap-2 px-2 py-1.5 text-sm rounded-md bg-accent border border-border">
+                    <div className="w-4" /> {/* 箭头占位 */}
+                    <Folder size={16} className="notion-sidebar-folder flex-shrink-0" />
+                    <input
+                      ref={newCategoryInputRef}
+                      type="text"
+                      value={newCategoryName}
+                      onChange={(e) => setNewCategoryName(e.target.value)}
+                      onKeyDown={handleNewCategoryKeyDown}
+                      onBlur={handleCreateCategory}
+                      placeholder="输入分类名称..."
+                      className="flex-1 bg-transparent notion-sidebar-text-primary placeholder:notion-sidebar-text-muted outline-none"
+                    />
+                  </div>
+                )}
+              </div>
+            </ElasticScroll>
+            
         <div className="p-2 border-t border-border space-y-2">
           {/* 快速主题切换按钮 */}
           <ThemeToggleButton />
           
           <button 
-            onClick={() => setSettingsOpen(true)}
+            onClick={() => {
+              setSettingsOpen(true);
+            }}
             className="w-full flex items-center gap-2 px-3 py-2 text-sm text-muted-foreground hover:bg-accent hover:text-foreground rounded-lg transition-colors"
           >
             <Settings size={16} />
             设置
           </button>
         </div>
+
+        {/* 设置抽屉 - 从底部滑出 */}
+        <SettingsPanel
+          isOpen={settingsOpen}
+          onClose={() => setSettingsOpen(false)}
+        />
 
         {/* Resize Handle */}
         <div 
@@ -866,12 +970,6 @@ export function Sidebar() {
         onCancel={() => setConfirmDialog(prev => ({ ...prev, isOpen: false }))}
       />
 
-      {/* 设置面板 */}
-      <SettingsPanel
-        isOpen={settingsOpen}
-        onClose={() => setSettingsOpen(false)}
-      />
-
       {/* 增强的删除确认对话框 */}
       <DeleteCategoryDialog
         isOpen={deleteDialog.isOpen}
@@ -883,20 +981,18 @@ export function Sidebar() {
         onClosed={handleDeleteClosed}
       />
 
-      {/* 导出对话框 */}
-      {exportDialogMounted && (
+      {/* 导出对话框 - 独立实现，与删除对话框使用相同的动画模式 */}
+      {exportDialog.categoryPath && (
         <ExportPromptsDialog
-          isOpen={!!exportCategoryPath}
-          originId={exportCategoryOriginId}
-          onClose={() => setExportCategoryPath(null)}
-          onClosed={() => {
-            setExportCategoryPath(null);
-            setExportDialogMounted(false);
-          }}
-          categoryPath={exportCategoryPath || undefined}
-          preserveStructure={true} // 分类导出保留结构
+          isOpen={exportDialog.isOpen}
+          originId={exportDialog.originId}
+          onClose={handleExportClose}
+          onClosed={handleExportClosed}
+          categoryPath={exportDialog.categoryPath}
+          preserveStructure={true}
         />
       )}
+
     </>
   );
 }

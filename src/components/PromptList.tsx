@@ -3,6 +3,9 @@
  * Notion 风格的卡片网格布局
  */
 
+// 🚨 TEMP: disable legacy interval scanner (V2 migration)
+const ENABLE_LEGACY_INTERVAL = false;
+
 import {
   Plus,
   Copy,
@@ -24,7 +27,9 @@ import {
   PinOff,
 } from 'lucide-react';
 import { useApp } from '../AppContext';
-import { useEffect, useRef, useState, type ReactNode, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import type { ReactNode } from 'react';
+import { useDocumentVisibility } from '../hooks/useDocumentVisibility';
 import { createPortal } from 'react-dom';
 // EditorPage 现在通过 EditorOverlay 系统使用，不再直接导入
 import api from '../api/client';
@@ -43,8 +48,10 @@ import { RecurrenceSelector } from './RecurrenceSelector';
 import { ImportPromptsDialog } from './ImportPromptsDialog';
 import { ExportPromptsDialog } from './ExportPromptsDialog';
 import { useSystemNotification } from '../hooks/useSystemNotification';
+import { useIntervalTasks } from '../hooks/useIntervalTasks';
 import { generateRecurrenceTag, generateScheduledTimeTag, getNextTriggerTime } from '../utils/recurrenceTag';
 import type { PromptData, RecurrenceConfig } from '../types';
+import { useVirtualScroll } from '../utils/virtualScroll';
 
 function SpotlightCard({
   children,
@@ -185,13 +192,31 @@ export function PromptList() {
   const [focusModeActive, setFocusModeActive] = useState<boolean>(false);
   const [focusedCardId, setFocusedCardId] = useState<string | null>(null);
   
-  // ========== Chrono Alert (时空警报) ==========
+  // ========== Chrono Alert (时空警报) - V2 极简版 ==========
   const [alertTask, setAlertTask] = useState<PromptData | null>(null);
+  // @ts-ignore - Used in handleAlertDismiss for one-time tasks
   const [dismissedAlerts, setDismissedAlerts] = useState<Set<string>>(new Set());
-  const [notifiedTasks, setNotifiedTasks] = useState<Set<string>>(new Set()); // 已发送系统通知的任务
+  
+  // 🔥 防止重复系统通知：记录已发送通知的任务 ID
+  const sentSystemNotificationsRef = useRef<Set<string>>(new Set());
+  
+  // 🔥 存储 handleAlertDismiss 的最新引用，用于自动关闭定时器
+  const handleAlertDismissRef = useRef<(() => Promise<void>) | null>(null);
+  
+  // 🔥 V2: 使用后端调度器，前端只负责轮询和显示
+  const apiBaseUrl = typeof window !== 'undefined' && window.location.port === '1420' 
+    ? 'http://localhost:3002'  // Tauri 桌面端
+    : 'http://localhost:3001'; // Web 端
+  
+  const { pendingTasks, acknowledgeTask } = useIntervalTasks(apiBaseUrl, true);
   
   // ========== System Notification (系统通知) ==========
-  const { sendTaskReminder, isSupported: notificationSupported } = useSystemNotification();
+  const {
+    sendTaskReminder,
+    resetTaskThrottle,
+    // @ts-ignore - Reserved for future use
+    isSupported: notificationSupported,
+  } = useSystemNotification();
   
   // ========== Import Dialog (导入对话框) ==========
   const [showImportDialog, setShowImportDialog] = useState<boolean>(false);
@@ -212,45 +237,10 @@ export function PromptList() {
 
   // ========== 辅助函数：生成带重复标识的标题 ==========
   const getTaskTitleWithRepeatIndicator = (prompt: PromptData): string => {
-    const baseTitle = prompt.meta.title;
-    
-    // 只有重复任务才添加标识
-    if (prompt.meta.type !== 'TASK' || !prompt.meta.recurrence) {
-      return baseTitle;
-    }
-    
-    try {
-      // 计算重复次数
-      const createdDate = new Date(prompt.meta.created_at);
-      const now = new Date();
-      
-      // 重置时间到当天开始，只比较日期
-      createdDate.setHours(0, 0, 0, 0);
-      now.setHours(0, 0, 0, 0);
-      
-      const daysDiff = Math.floor((now.getTime() - createdDate.getTime()) / (24 * 60 * 60 * 1000));
-      
-      let repeatCount = 1; // 默认从 1 开始
-      
-      if (prompt.meta.recurrence.type === 'daily') {
-        // 每日任务：天数差 + 1
-        repeatCount = daysDiff + 1;
-      } else if (prompt.meta.recurrence.type === 'weekly') {
-        // 每周任务：周数差 + 1
-        repeatCount = Math.floor(daysDiff / 7) + 1;
-      } else if (prompt.meta.recurrence.type === 'monthly') {
-        // 每月任务：月数差 + 1
-        repeatCount = Math.floor(daysDiff / 30) + 1;
-      }
-      
-      // 确保至少是 1
-      repeatCount = Math.max(1, repeatCount);
-      
-      return `${baseTitle} X${repeatCount}`;
-    } catch (error) {
-      // 如果计算出错，返回原标题
-      return baseTitle;
-    }
+    // 🔥 修复：移除所有任务的重复次数标识
+    // 用户反馈：所有任务（一次性、interval、daily、weekly、monthly）都不需要显示 X1、X2 等后缀
+    // 直接返回原始标题
+    return prompt.meta.title;
   };
 
   const fireworkParticles = useMemo(() => {
@@ -268,9 +258,76 @@ export function PromptList() {
   }, []);
 
   // ========== 获取过滤后的提示词列表 (必须在 useEffect 之前) ==========
-  const prompts = getFilteredPrompts();
+  const allPrompts = getFilteredPrompts();
+  
+  // 🔥 调试：检查数据是否加载
+  useEffect(() => {
+    console.log('[PromptList Debug]', {
+      hasFileSystem: !!state.fileSystem,
+      allPromptsCount: state.fileSystem?.allPrompts.size || 0,
+      filteredPromptsCount: allPrompts.length,
+      selectedCategory: state.selectedCategory,
+      searchQuery: state.searchQuery,
+    });
+  }, [state.fileSystem, allPrompts.length, state.selectedCategory, state.searchQuery]);
+  
   const isModalOpen = uiState.newPromptModal.isOpen;
   const preselectedCategory = uiState.newPromptModal.preselectedCategory;
+  
+  // ========== Virtual Scrolling Configuration ==========
+  const VIRTUAL_SCROLL_THRESHOLD = 50;
+  const CARD_HEIGHT = 272; // 64 (h-64) * 4 (1rem = 4px) + gap
+  const [containerHeight, setContainerHeight] = useState(800);
+  const elasticScrollRef = useRef<HTMLDivElement>(null);
+  
+  // Enable virtual scrolling only when there are >50 cards
+  const enableVirtualScroll = allPrompts.length > VIRTUAL_SCROLL_THRESHOLD;
+  
+  // Use virtual scroll hook
+  const { visibleItems, totalHeight, offsetY, onScroll } = useVirtualScroll(
+    allPrompts,
+    {
+      itemHeight: CARD_HEIGHT,
+      overscan: 3,
+      containerHeight,
+    },
+    enableVirtualScroll
+  );
+  
+  // Use visible items when virtual scrolling is enabled, otherwise use all prompts
+  const prompts = enableVirtualScroll ? visibleItems : allPrompts;
+  
+  // Attach scroll listener to ElasticScroll's inner div
+  useEffect(() => {
+    if (!enableVirtualScroll || !elasticScrollRef.current) return;
+    
+    // Find the scrollable div inside ElasticScroll
+    const scrollableDiv = elasticScrollRef.current.querySelector('div[style*="overflowY"]') as HTMLDivElement;
+    if (!scrollableDiv) return;
+    
+    const handleScroll = (e: Event) => {
+      const syntheticEvent = {
+        currentTarget: e.currentTarget,
+      } as React.UIEvent<HTMLDivElement>;
+      onScroll(syntheticEvent);
+    };
+    
+    scrollableDiv.addEventListener('scroll', handleScroll);
+    
+    // Update container height
+    const updateHeight = () => {
+      setContainerHeight(scrollableDiv.clientHeight);
+    };
+    updateHeight();
+    window.addEventListener('resize', updateHeight);
+    
+    return () => {
+      scrollableDiv.removeEventListener('scroll', handleScroll);
+      window.removeEventListener('resize', updateHeight);
+    };
+  }, [enableVirtualScroll, onScroll]);
+
+  const { isHidden } = useDocumentVisibility();
 
   // ========== 扫描过期任务 (Scan Expired Tasks) ==========
   // 🔥 使用 ref 存储最新的状态，避免 setInterval 闭包问题
@@ -278,10 +335,31 @@ export function PromptList() {
   const dismissedAlertsRef = useRef<Set<string>>(new Set());
   const notifiedTasksRef = useRef<Set<string>>(new Set());
   const alertTaskRef = useRef<PromptData | null>(null);
+  const sessionStartedAtRef = useRef<number>(Date.now());
+  const firstScanRef = useRef<boolean>(true);
+  
+  // 🔒 内存锁：存储正在被操作的任务 ID，避免扫描器在保存期间重复触发
+  const processingTaskIds = useRef<Set<string>>(new Set());
+  
+  // 🛡️ 坏任务黑名单：记录本次会话中保存失败的任务，防止死循环
+  const brokenTasksRef = useRef<Set<string>>(new Set());
   
   // 🔥 检查过期任务的核心函数（提取出来避免闭包问题）
+  // @ts-ignore - V1 legacy scanner, disabled in favor of V2 backend scheduler
   const checkExpiredTasksCore = async () => {
+    // 🚨 V2: 旧扫描器已禁用，使用后端调度器
+    if (!ENABLE_LEGACY_INTERVAL) {
+      return;
+    }
+    
+    // 🚨 紧急停止开关：如果设置了这个标志，立即停止所有扫描和通知
+    if (typeof window !== 'undefined' && window.localStorage?.getItem('lumina_stop_scanner') === '1') {
+      return;
+    }
+    
     const now = Date.now();
+    const sessionStartMs = sessionStartedAtRef.current;
+    const isFirstScan = firstScanRef.current;
     
     // 使用 ref 获取最新的 allPrompts
     const allPrompts = Array.from(allPromptsRef.current.values());
@@ -289,11 +367,29 @@ export function PromptList() {
     const currentNotifiedTasks = notifiedTasksRef.current;
     const currentAlertTask = alertTaskRef.current;
     
+    const debugDue =
+      typeof window !== 'undefined' && window.localStorage?.getItem('lumina_debug_due') === '1';
+    
     // 🔥 过期超过 1 小时的任务不再触发通知（避免每次启动都重复提醒）
     const ONE_HOUR = 60 * 60 * 1000;
+
+    // 🔥 重复任务：错过窗口（用于避免重启后立刻补弹）
+    const RECURRENCE_GRACE_MS = 2 * 60 * 1000;
+    
+    // 🔥 启动抑制：启动后5秒内不发送通知和弹窗
+    const STARTUP_SUPPRESS_DURATION_MS = 5000;
+    const isInStartupPeriod = (now - sessionStartMs) < STARTUP_SUPPRESS_DURATION_MS;
+    const missedRecurringUpdates: PromptData[] = [];
+
+    // 🔥 方案A：窗口隐藏且系统通知不支持时，仅扫描 interval（每 N 分钟）任务
+    // @ts-ignore - V1 legacy code, disabled
+    const intervalOnlyMode = isHidden && !notificationSupported;
     
     // 查找所有过期的任务（一次性任务）- 排除回收站中的任务
-    const expiredTasks = allPrompts.filter(prompt => {
+    const expiredTasks = intervalOnlyMode ? [] : allPrompts.filter(prompt => {
+      // 🔒 关键检查：如果这个任务正在被"处理"（比如正在关闭中），直接跳过！
+      if (processingTaskIds.current.has(prompt.meta.id)) return false;
+      
       if (prompt.meta.type !== 'TASK') return false;
       if (!prompt.meta.scheduled_time) return false;
       if (currentDismissedAlerts.has(prompt.meta.id)) return false;
@@ -306,24 +402,139 @@ export function PromptList() {
       const isRecentlyExpired = (now - scheduledTime) <= ONE_HOUR;
       return isExpired && isRecentlyExpired;
     });
+
+    // 🔥 用于清理/抑制：忽略 dismissed 的到点集合（避免点 X 后被错误清除抑制而反复弹）
+    const expiredTasksIgnoringDismissed = intervalOnlyMode ? [] : allPrompts.filter(prompt => {
+      if (prompt.meta.type !== 'TASK') return false;
+      if (!prompt.meta.scheduled_time) return false;
+      // 排除回收站中的任务
+      if (prompt.path?.includes('/trash/') || prompt.path?.includes('\\trash\\')) return false;
+
+      const scheduledTime = new Date(prompt.meta.scheduled_time).getTime();
+      const isExpired = scheduledTime <= now;
+      const isRecentlyExpired = (now - scheduledTime) <= ONE_HOUR;
+      return isExpired && isRecentlyExpired;
+    });
     
     // 检查重复任务 - 排除回收站中的任务
     const recurringTasks = allPrompts.filter(prompt => {
+      // 🛡️ 关键检查：如果这个任务已知是坏的（保存失败过），直接跳过！
+      if (brokenTasksRef.current.has(prompt.meta.id)) {
+        return false;
+      }
+      
+      // 🔒 关键检查：如果这个任务正在被"处理"（比如正在关闭中），直接跳过！
+      if (processingTaskIds.current.has(prompt.meta.id)) return false;
+      
       if (prompt.meta.type !== 'TASK') return false;
       if (!prompt.meta.recurrence?.enabled) return false;
-      if (currentDismissedAlerts.has(prompt.meta.id)) return false;
+      
+      // 🔥 自我纠错机制：检查是否进入新周期
+      // 如果是新周期，强制清除旧的拦截标记
+      if (prompt.meta.recurrence?.type === 'interval') {
+        const intervalMinutes = prompt.meta.recurrence.intervalMinutes;
+        if (intervalMinutes && intervalMinutes > 0) {
+          const baselineStr = prompt.meta.last_notified ?? prompt.meta.created_at;
+          if (baselineStr) {
+            const baseMs = new Date(baselineStr).getTime();
+            const intervalMs = intervalMinutes * 60 * 1000;
+            const nowMs = Date.now();
+            
+            // 判断是否进入新周期
+            const isNewCycle = nowMs >= (baseMs + intervalMs);
+            
+            if (isNewCycle && currentDismissedAlerts.has(prompt.meta.id)) {
+              // 强制清除旧的拦截标记
+              dismissedAlertsRef.current.delete(prompt.meta.id);
+              setDismissedAlerts(prev => {
+                const next = new Set(prev);
+                next.delete(prompt.meta.id);
+                return next;
+              });
+            }
+            
+            if (isNewCycle && currentNotifiedTasks.has(prompt.meta.id)) {
+              notifiedTasksRef.current.delete(prompt.meta.id);
+            }
+          }
+        }
+      }
+      
+      const isDismissed = currentDismissedAlerts.has(prompt.meta.id);
+      
+      if (isDismissed) return false;
       // 排除回收站中的任务
       if (prompt.path?.includes('/trash/') || prompt.path?.includes('\\trash\\')) return false;
       
       // 内联检查重复任务触发条件
       const recurrence = prompt.meta.recurrence;
       if (!recurrence.enabled) return false;
+
+      if (intervalOnlyMode && recurrence.type !== 'interval') return false;
       
       const nowDate = new Date();
+      if (recurrence.type === 'interval') {
+        const intervalMinutes = recurrence.intervalMinutes;
+        if (!intervalMinutes || intervalMinutes <= 0) return false;
+
+        const baselineStr = prompt.meta.last_notified ?? prompt.meta.created_at;
+        if (!baselineStr) return false;
+
+        const baseMs = new Date(baselineStr).getTime();
+        if (!Number.isFinite(baseMs)) return false;
+
+        const intervalMs = intervalMinutes * 60 * 1000;
+        const nowMs = nowDate.getTime();
+        const diff = nowMs - baseMs;
+        if (diff < intervalMs) return false;
+
+        // 🔥 修复：对于 interval 任务，计算当前周期的触发时间
+        // 而不是第一次触发时间，避免刷新后被启动抑制误杀
+        const cyclesPassed = Math.floor(diff / intervalMs);
+        const currentCycleTriggerMs = baseMs + cyclesPassed * intervalMs;
+
+        // 启动抑制：如果当前周期的触发时间在启动前，则跳过补弹
+        if (currentCycleTriggerMs < sessionStartMs) {
+          // 首次扫描时更新 last_notified
+          if (isFirstScan) {
+            const updated = {
+              ...prompt,
+              meta: {
+                ...prompt.meta,
+                last_notified: new Date(sessionStartMs).toISOString(),
+              },
+            };
+            const nextMap = new Map(allPromptsRef.current);
+            nextMap.set(prompt.meta.id, updated);
+            allPromptsRef.current = nextMap;
+            missedRecurringUpdates.push(updated);
+          }
+          return false;
+        }
+
+        return true;
+      }
+
       const [hours, minutes] = recurrence.time.split(':').map(Number);
       const todayTriggerTime = new Date(nowDate.getFullYear(), nowDate.getMonth(), nowDate.getDate(), hours, minutes, 0);
       
       if (nowDate < todayTriggerTime) return false;
+
+      const lateMs = nowDate.getTime() - todayTriggerTime.getTime();
+      if (lateMs > RECURRENCE_GRACE_MS) {
+        const updated = {
+          ...prompt,
+          meta: {
+            ...prompt.meta,
+            last_notified: todayTriggerTime.toISOString(),
+          },
+        };
+        const nextMap = new Map(allPromptsRef.current);
+        nextMap.set(prompt.meta.id, updated);
+        allPromptsRef.current = nextMap;
+        missedRecurringUpdates.push(updated);
+        return false;
+      }
       
       if (prompt.meta.last_notified) {
         const lastNotifiedDate = new Date(prompt.meta.last_notified);
@@ -341,11 +552,200 @@ export function PromptList() {
       
       switch (recurrence.type) {
         case 'daily':
+          if (isFirstScan && todayTriggerTime.getTime() < sessionStartMs) {
+            const updated = {
+              ...prompt,
+              meta: {
+                ...prompt.meta,
+                last_notified: todayTriggerTime.toISOString(),
+              },
+            };
+            const nextMap = new Map(allPromptsRef.current);
+            nextMap.set(prompt.meta.id, updated);
+            allPromptsRef.current = nextMap;
+            missedRecurringUpdates.push(updated);
+            return false;
+          }
           return true;
         case 'weekly':
-          return recurrence.weekDays?.includes(nowDate.getDay()) ?? false;
+          if (!(recurrence.weekDays?.includes(nowDate.getDay()) ?? false)) return false;
+          if (isFirstScan && todayTriggerTime.getTime() < sessionStartMs) {
+            const updated = {
+              ...prompt,
+              meta: {
+                ...prompt.meta,
+                last_notified: todayTriggerTime.toISOString(),
+              },
+            };
+            const nextMap = new Map(allPromptsRef.current);
+            nextMap.set(prompt.meta.id, updated);
+            allPromptsRef.current = nextMap;
+            missedRecurringUpdates.push(updated);
+            return false;
+          }
+          return true;
         case 'monthly':
-          return recurrence.monthDays?.includes(nowDate.getDate()) ?? false;
+          if (!(recurrence.monthDays?.includes(nowDate.getDate()) ?? false)) return false;
+          if (isFirstScan && todayTriggerTime.getTime() < sessionStartMs) {
+            const updated = {
+              ...prompt,
+              meta: {
+                ...prompt.meta,
+                last_notified: todayTriggerTime.toISOString(),
+              },
+            };
+            const nextMap = new Map(allPromptsRef.current);
+            nextMap.set(prompt.meta.id, updated);
+            allPromptsRef.current = nextMap;
+            missedRecurringUpdates.push(updated);
+            return false;
+          }
+          return true;
+        default:
+          return false;
+      }
+    });
+
+    const recurringTasksIgnoringDismissed = allPrompts.filter(prompt => {
+      if (prompt.meta.type !== 'TASK') return false;
+      if (!prompt.meta.recurrence?.enabled) return false;
+      // 排除回收站中的任务
+      if (prompt.path?.includes('/trash/') || prompt.path?.includes('\\trash\\')) return false;
+
+      const recurrence = prompt.meta.recurrence;
+      if (!recurrence.enabled) return false;
+
+      if (intervalOnlyMode && recurrence.type !== 'interval') return false;
+
+      const nowDate = new Date();
+      if (recurrence.type === 'interval') {
+        const intervalMinutes = recurrence.intervalMinutes;
+        if (!intervalMinutes || intervalMinutes <= 0) return false;
+
+        const baselineStr = prompt.meta.last_notified ?? prompt.meta.created_at;
+        if (!baselineStr) return false;
+
+        const baseMs = new Date(baselineStr).getTime();
+        if (!Number.isFinite(baseMs)) return false;
+
+        const intervalMs = intervalMinutes * 60 * 1000;
+        const nowMs = nowDate.getTime();
+        const diff = nowMs - baseMs;
+        
+        if (diff < intervalMs) return false;
+
+        // 🔥 修复：对于 interval 任务，计算当前周期的触发时间
+        const cyclesPassed = Math.floor(diff / intervalMs);
+        const currentCycleTriggerMs = baseMs + cyclesPassed * intervalMs;
+        
+        // 启动抑制：如果当前周期的触发时间在启动前，则跳过补弹
+        if (currentCycleTriggerMs < sessionStartMs) {
+          // 首次扫描时更新 last_notified
+          if (isFirstScan) {
+            const updated = {
+              ...prompt,
+              meta: {
+                ...prompt.meta,
+                last_notified: new Date(sessionStartMs).toISOString(),
+              },
+            };
+            const nextMap = new Map(allPromptsRef.current);
+            nextMap.set(prompt.meta.id, updated);
+            allPromptsRef.current = nextMap;
+            missedRecurringUpdates.push(updated);
+          }
+          return false;
+        }
+
+        return true;
+      }
+
+      const [hours, minutes] = recurrence.time.split(':').map(Number);
+      const todayTriggerTime = new Date(nowDate.getFullYear(), nowDate.getMonth(), nowDate.getDate(), hours, minutes, 0);
+
+      if (nowDate < todayTriggerTime) return false;
+
+      const lateMs = nowDate.getTime() - todayTriggerTime.getTime();
+      if (lateMs > RECURRENCE_GRACE_MS) {
+        const updated = {
+          ...prompt,
+          meta: {
+            ...prompt.meta,
+            last_notified: todayTriggerTime.toISOString(),
+          },
+        };
+        const nextMap = new Map(allPromptsRef.current);
+        nextMap.set(prompt.meta.id, updated);
+        allPromptsRef.current = nextMap;
+        missedRecurringUpdates.push(updated);
+        return false;
+      }
+
+      if (prompt.meta.last_notified) {
+        const lastNotifiedDate = new Date(prompt.meta.last_notified);
+        if (lastNotifiedDate.toDateString() === nowDate.toDateString()) {
+          return false;
+        }
+      }
+
+      if (prompt.meta.created_at) {
+        const createdDate = new Date(prompt.meta.created_at);
+        if (createdDate.toDateString() === nowDate.toDateString() && createdDate > todayTriggerTime) {
+          return false;
+        }
+      }
+
+      switch (recurrence.type) {
+        case 'daily':
+          if (isFirstScan && todayTriggerTime.getTime() < sessionStartMs) {
+            const updated = {
+              ...prompt,
+              meta: {
+                ...prompt.meta,
+                last_notified: todayTriggerTime.toISOString(),
+              },
+            };
+            const nextMap = new Map(allPromptsRef.current);
+            nextMap.set(prompt.meta.id, updated);
+            allPromptsRef.current = nextMap;
+            missedRecurringUpdates.push(updated);
+            return false;
+          }
+          return true;
+        case 'weekly':
+          if (!(recurrence.weekDays?.includes(nowDate.getDay()) ?? false)) return false;
+          if (isFirstScan && todayTriggerTime.getTime() < sessionStartMs) {
+            const updated = {
+              ...prompt,
+              meta: {
+                ...prompt.meta,
+                last_notified: todayTriggerTime.toISOString(),
+              },
+            };
+            const nextMap = new Map(allPromptsRef.current);
+            nextMap.set(prompt.meta.id, updated);
+            allPromptsRef.current = nextMap;
+            missedRecurringUpdates.push(updated);
+            return false;
+          }
+          return true;
+        case 'monthly':
+          if (!(recurrence.monthDays?.includes(nowDate.getDate()) ?? false)) return false;
+          if (isFirstScan && todayTriggerTime.getTime() < sessionStartMs) {
+            const updated = {
+              ...prompt,
+              meta: {
+                ...prompt.meta,
+                last_notified: todayTriggerTime.toISOString(),
+              },
+            };
+            const nextMap = new Map(allPromptsRef.current);
+            nextMap.set(prompt.meta.id, updated);
+            allPromptsRef.current = nextMap;
+            missedRecurringUpdates.push(updated);
+            return false;
+          }
+          return true;
         default:
           return false;
       }
@@ -353,51 +753,270 @@ export function PromptList() {
     
     // 合并所有需要提醒的任务
     const allAlertTasks = [...expiredTasks, ...recurringTasks];
+
+    if (debugDue) {
+      let nearestMs = Infinity;
+      let nearestId: string | null = null;
+      for (const p of allPrompts) {
+        if (p.meta.type !== 'TASK') continue;
+        if (p.path?.includes('/trash/') || p.path?.includes('\\trash\\')) continue;
+
+        if (p.meta.scheduled_time && !p.meta.recurrence?.enabled) {
+          const t = new Date(p.meta.scheduled_time).getTime();
+          if (Number.isFinite(t) && t < nearestMs) {
+            nearestMs = t;
+            nearestId = p.meta.id;
+          }
+          continue;
+        }
+
+        const r = p.meta.recurrence;
+        if (!r?.enabled) continue;
+        if (r.type === 'interval') {
+          const intervalMinutes = r.intervalMinutes;
+          const baseStr = p.meta.last_notified ?? p.meta.created_at;
+          if (!intervalMinutes || intervalMinutes <= 0 || !baseStr) continue;
+          const baseMs = new Date(baseStr).getTime();
+          if (!Number.isFinite(baseMs)) continue;
+          const due = baseMs + intervalMinutes * 60 * 1000;
+          if (due < nearestMs) {
+            nearestMs = due;
+            nearestId = p.meta.id;
+          }
+          continue;
+        }
+
+        const baseStr = p.meta.last_notified ?? p.meta.created_at;
+        const nextIso = getNextTriggerTime(r, baseStr);
+        const nextMs = new Date(nextIso).getTime();
+        if (Number.isFinite(nextMs) && nextMs < nearestMs) {
+          nearestMs = nextMs;
+          nearestId = p.meta.id;
+        }
+      }
+
+      const delta = Number.isFinite(nearestMs) ? nearestMs - now : null;
+      console.debug('[due-debug] scan', {
+        now,
+        nearestId,
+        nearestMs: Number.isFinite(nearestMs) ? nearestMs : null,
+        deltaMs: delta,
+        alertTasks: allAlertTasks.map(t => t.meta.id),
+        currentAlertId: currentAlertTask?.meta.id ?? null,
+      });
+    }
+
+    // 🔥 清理：重复任务在“未到点”时应允许下次周期再次提醒
+    // - notifiedTasks：只保留当前仍到点的任务，避免重复任务只通知一次
+    // - dismissedAlerts：对重复任务只做“本轮抑制”，进入下一轮后自动清除
+    const dueIgnoringDismissedIds = new Set([
+      ...expiredTasksIgnoringDismissed.map(t => t.meta.id),
+      ...recurringTasksIgnoringDismissed.map(t => t.meta.id),
+    ]);
+
+    // @ts-ignore - V2: 旧扫描器代码，已禁用
+    setNotifiedTasks(prev => {
+      if (prev.size === 0) return prev;
+      const next = new Set<string>();
+      prev.forEach((id: string) => {
+        if (dueIgnoringDismissedIds.has(id)) next.add(id);
+      });
+      if (next.size === prev.size) {
+        let same = true;
+        prev.forEach((id: string) => {
+          if (!next.has(id)) same = false;
+        });
+        if (same) return prev;
+      }
+      return next;
+    });
+
+    setDismissedAlerts(prev => {
+      if (prev.size === 0) return prev;
+      let changed = false;
+      const next = new Set(prev);
+      for (const id of Array.from(next)) {
+        if (!dueIgnoringDismissedIds.has(id)) {
+          const p = allPromptsRef.current.get(id);
+          if (p?.meta.recurrence?.enabled) {
+            next.delete(id);
+            changed = true;
+          }
+        }
+      }
+      return changed ? next : prev;
+    });
     
     // 发送系统通知（只发送一次）
-    for (const task of allAlertTasks) {
-      if (!currentNotifiedTasks.has(task.meta.id) && notificationSupported) {
-        const isExpired = expiredTasks.includes(task);
-        await sendTaskReminder(task.meta.title, isExpired);
-        setNotifiedTasks(prev => new Set(prev).add(task.meta.id));
+    // 🔥 启动后5秒内不发送系统通知，避免重启时立即通知
+    if (!isInStartupPeriod) {
+      for (const task of allAlertTasks) {
+        // 🔥 对于 interval 任务，检查是否进入了新的触发周期
+        // 如果当前时间已经超过了 last_notified + interval，说明是新周期，需要清除旧的通知记录
+        let shouldNotify = !currentNotifiedTasks.has(task.meta.id);
+        
+        if (!shouldNotify && task.meta.recurrence?.enabled && task.meta.recurrence.type === 'interval') {
+          const intervalMinutes = task.meta.recurrence.intervalMinutes;
+          const lastNotified = task.meta.last_notified;
+          
+          if (intervalMinutes && lastNotified) {
+            const lastNotifiedMs = new Date(lastNotified).getTime();
+            const intervalMs = intervalMinutes * 60 * 1000;
+            const nowMs = Date.now();
+            
+            // 如果已经过了一个完整的 interval 周期，说明是新的触发周期
+            if (nowMs >= lastNotifiedMs + intervalMs) {
+              shouldNotify = true;
+              // 清除旧的通知记录
+              // @ts-ignore - V2: 旧扫描器代码，已禁用
+              setNotifiedTasks(prev => {
+                const next = new Set(prev);
+                next.delete(task.meta.id);
+                return next;
+              });
+            }
+          }
+        }
+        
+        if (shouldNotify) {
+          // 判断任务是否已过期：一次性任务在expiredTasks中，重复任务都算已过期
+          const isExpired = expiredTasks.includes(task) || recurringTasks.includes(task);
+          const isRecurring = recurringTasks.includes(task);
+          // @ts-ignore - V1 legacy code, disabled
+          if (notificationSupported) {
+            const sent = await sendTaskReminder(task.meta.id, task.meta.title, isExpired, isRecurring);
+            if (sent) {
+              // @ts-ignore - V2: 旧扫描器代码，已禁用
+              setNotifiedTasks(prev => new Set(prev).add(task.meta.id));
+              try {
+                const updated = {
+                  ...task,
+                  meta: {
+                    ...task.meta,
+                    last_notified: new Date().toISOString(),
+                  },
+                };
+                await savePrompt(updated);
+              } catch {
+              }
+            }
+          }
+        }
       }
     }
-    
-    // 显示第一个任务的页面警报
-    if (allAlertTasks.length > 0 && !currentAlertTask) {
-      setAlertTask(allAlertTasks[0]);
+
+    if (missedRecurringUpdates.length > 0) {
+      void (async () => {
+        for (const updated of missedRecurringUpdates) {
+          try {
+            await savePrompt(updated);
+          } catch {
+          }
+        }
+      })();
     }
+
+    // 🔥 最小化/隐藏但系统通知可用：仅发系统通知，不弹应用内 ChronoAlert
+    // @ts-ignore - V1 legacy code, disabled
+    if (isHidden && notificationSupported) {
+      if (currentAlertTask) setAlertTask(null);
+      if (isFirstScan) firstScanRef.current = false;
+      return;
+    }
+    
+    // 🔥 启动后5秒内不显示应用内警报，避免重启时立即弹窗
+    if (isInStartupPeriod) {
+      if (currentAlertTask) setAlertTask(null);
+      if (isFirstScan) firstScanRef.current = false;
+      return;
+    }
+    
+    // 显示页面警报：如果当前警报为空，或当前警报已不在待提醒列表中，则切换到最新的第一个
+    if (allAlertTasks.length === 0) {
+      if (currentAlertTask) setAlertTask(null);
+      if (isFirstScan) firstScanRef.current = false;
+      return;
+    }
+
+    const nextAlert = allAlertTasks[0];
+    const currentStillPending =
+      !!currentAlertTask && allAlertTasks.some(t => t.meta.id === currentAlertTask.meta.id);
+    if (!currentAlertTask || !currentStillPending) {
+      setAlertTask(nextAlert);
+    }
+
+    if (isFirstScan) firstScanRef.current = false;
   };
   
-  // 同步 ref 与 state，并在数据变化时立即检查
+  // ========== V2: 显示待通知的任务 + 系统通知 + 自动关闭 ==========
   useEffect(() => {
-    const newAllPrompts = state.fileSystem?.allPrompts || new Map();
-    allPromptsRef.current = newAllPrompts;
-    
-    // 🔥 关键：当 allPrompts 数据变化时，立即检查过期任务
-    if (newAllPrompts.size > 0) {
-      checkExpiredTasksCore();
+    if (pendingTasks.length > 0) {
+      // 显示第一个待通知的任务
+      const task = pendingTasks[0];
+      const taskId = task.meta.id;
+      
+      // 🔥 如果 alertTask 不匹配，更新它
+      if (!alertTask || alertTask.meta.id !== taskId) {
+        setAlertTask(task);
+        
+        // 🎯 刷新 vault 数据，因为后端在任务到期时更新了 last_notified
+        // 这样 ChronoCard 的 key 会变化，组件会重新挂载，动画从头开始
+        refreshVault().catch(err => console.error('[V2 Notification] Failed to refresh vault:', err));
+      }
+      
+    } else if (pendingTasks.length === 0 && alertTask) {
+      // 所有任务都已处理，清除警报
+      const isStillPending = pendingTasks.some(t => t.meta.id === alertTask.meta.id);
+      if (!isStillPending) {
+        setAlertTask(null);
+        // 清除已发送通知的记录
+        sentSystemNotificationsRef.current.delete(alertTask.meta.id);
+      }
     }
-  }, [state.fileSystem?.allPrompts]);
-  
-  useEffect(() => {
-    dismissedAlertsRef.current = dismissedAlerts;
-  }, [dismissedAlerts]);
-  
-  useEffect(() => {
-    notifiedTasksRef.current = notifiedTasks;
-  }, [notifiedTasks]);
-  
-  useEffect(() => {
-    alertTaskRef.current = alertTask;
-  }, [alertTask]);
-  
-  // 定时检查（每 5 秒）
-  useEffect(() => {
-    const timer = setInterval(checkExpiredTasksCore, 5000);
-    return () => clearInterval(timer);
-  }, [notificationSupported, sendTaskReminder]);
+  }, [pendingTasks, alertTask, refreshVault]);
 
+  // ========== V2: 系统通知 + 自动关闭定时器（独立 effect）==========
+  useEffect(() => {
+    if (!alertTask) return;
+    
+    const taskId = alertTask.meta.id;
+    
+    // 🔥 立即发送系统通知
+    const sendSystemNotification = async () => {
+      // 🔥 双重检查：防止 React StrictMode 导致的重复执行
+      if (sentSystemNotificationsRef.current.has(taskId)) {
+        return; // 已经发送过，跳过
+      }
+      
+      // 标记为已发送
+      sentSystemNotificationsRef.current.add(taskId);
+      
+      try {
+        const isRecurring = !!alertTask.meta.recurrence?.enabled;
+        await sendTaskReminder(taskId, alertTask.meta.title, true, isRecurring);
+      } catch (error) {
+        console.error('[V2 Notification] Failed to send system notification:', error);
+        // 发送失败，移除标记，允许重试
+        sentSystemNotificationsRef.current.delete(taskId);
+      }
+    };
+    
+    // 立即发送系统通知
+    sendSystemNotification();
+    
+    // 🔥 3秒后自动关闭通知
+    const autoDismissTimer = setTimeout(() => {
+      // 使用 ref 获取最新的 handleAlertDismiss 函数
+      if (handleAlertDismissRef.current) {
+        handleAlertDismissRef.current();
+      }
+    }, 3000);
+    
+    // 清理定时器
+    return () => {
+      clearTimeout(autoDismissTimer);
+    };
+  }, [alertTask]);
 
   // ========== Focus Mode 处理函数 ==========
   const enterFocusMode = (promptId: string) => {
@@ -433,15 +1052,31 @@ export function PromptList() {
     }
   };
   
-  const handleAlertDismiss = async () => {
-    if (alertTask) {
-      const taskId = alertTask.meta.id;
-      
-      // 🔥 先切换到"全部"视图，让卡片可见
-      dispatch({ type: 'SELECT_CATEGORY', payload: null });
-      
-      // 🔥 先关闭通知栏
+  const handleAlertDismiss = useCallback(async () => {
+    if (!alertTask) return;
+    
+    const taskId = alertTask.meta.id;
+    const isRecurringTask = !!alertTask.meta.recurrence?.enabled;
+    
+    // Reset notification throttle for this task
+    resetTaskThrottle(taskId);
+    
+    try {
+      // 🔥 先关闭通知栏，防止重复触发系统通知
       setAlertTask(null);
+
+      // 重复任务：调用后端 acknowledge API
+      if (isRecurringTask && alertTask.meta.recurrence?.type === 'interval') {
+        const result = await acknowledgeTask(taskId);
+        
+        if (!result.success) {
+          showToast('确认失败，请重试', 'error');
+        }
+        
+        return;
+      }
+
+      // 一次性任务：移动到回收站
       setDismissedAlerts(prev => new Set(prev).add(taskId));
       
       // 🔥 等待视图切换，然后触发卡片删除动画
@@ -469,8 +1104,15 @@ export function PromptList() {
           }
         }, 600); // 等待粒子动画完成
       }, 150); // 等待视图切换
+    } catch (error) {
+      showToast('操作失败', 'error');
     }
-  };
+  }, [alertTask, acknowledgeTask, showToast, deletePrompt, resetTaskThrottle]);
+  
+  // 🔥 更新 ref，确保定时器总是调用最新的函数
+  useEffect(() => {
+    handleAlertDismissRef.current = handleAlertDismiss;
+  }, [handleAlertDismiss]);
   
   // ========== ESC 键退出 Focus Mode ==========
   useEffect(() => {
@@ -1423,7 +2065,9 @@ export function PromptList() {
       await restorePrompt(promptId);
       showToast("已恢复", 'success');
     } catch (error) {
-      showToast("恢复失败", 'error');
+      console.error('[Restore] Failed to restore prompt:', error);
+      const errorMessage = error instanceof Error ? error.message : '未知错误';
+      showToast(`恢复失败: ${errorMessage}`, 'error');
     }
   };
   
@@ -1985,7 +2629,7 @@ export function PromptList() {
         }}
       >
       <ElasticScroll
-        ref={scrollContainerRef}
+        ref={elasticScrollRef}
         className="h-full bg-background/30"
         onContextMenu={(e) => {
           e.preventDefault();
@@ -1994,7 +2638,7 @@ export function PromptList() {
       >
         <div className={`max-w-6xl mx-auto px-6 py-8 pb-20 relative no-scrollbar transition-opacity duration-150 ${isSwitchingList ? 'opacity-70' : 'opacity-100'}`}>
           <h1 className="text-2xl md:text-3xl font-bold text-foreground tracking-tight animate-fade-in mb-6">
-            我的提示词库
+            我的内容库
           </h1>
 
           {/* Content Toolbar */}
@@ -2133,7 +2777,23 @@ export function PromptList() {
           )}
 
           {/* Cards Grid */}
-          <div className={`grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 ${focusModeActive ? 'focus-mode-active' : ''}`}>
+          <div 
+            className={`grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 ${focusModeActive ? 'focus-mode-active' : ''}`}
+            style={enableVirtualScroll ? {
+              height: `${totalHeight}px`,
+              position: 'relative',
+            } : undefined}
+          >
+            <div
+              style={enableVirtualScroll ? {
+                transform: `translateY(${offsetY}px)`,
+                position: 'absolute',
+                top: 0,
+                left: 0,
+                right: 0,
+              } : undefined}
+              className={enableVirtualScroll ? 'grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4' : 'contents'}
+            >
             {prompts.map((prompt, index) => {
               const isInTrash = selectedCategory === 'trash';
               const trashItemName = isInTrash ? getTrashItemName(prompt.path) : null;
@@ -2396,18 +3056,34 @@ export function PromptList() {
                         {/* 重复标签 - 简洁文字，无图标 */}
                         <div className="text-center">
                           <span className="text-xs font-medium text-rose-400 bg-rose-500/10 px-2 py-0.5 rounded">
-                            {generateRecurrenceTag(prompt.meta.recurrence)} · {prompt.meta.recurrence.time}
+                            {prompt.meta.recurrence.type === 'interval'
+                              ? generateRecurrenceTag(prompt.meta.recurrence)
+                              : `${generateRecurrenceTag(prompt.meta.recurrence)} · ${prompt.meta.recurrence.time}`}
                           </span>
                         </div>
                         {/* 使用原有的 ChronoCard 显示倒计时 */}
                         <ChronoCard
-                          targetDate={getNextTriggerTime(prompt.meta.recurrence)}
-                          startDate={prompt.meta.created_at}
+                          key={`chrono-${prompt.meta.id}-${prompt.meta.recurrence.type === 'interval' ? prompt.meta.recurrence.intervalMinutes : 'other'}-${prompt.meta.last_notified || prompt.meta.created_at}`}
+                          targetDate={getNextTriggerTime(
+                            prompt.meta.recurrence,
+                            prompt.meta.last_notified ?? prompt.meta.created_at
+                          )}
+                          startDate={
+                            prompt.meta.recurrence.type === 'interval'
+                              ? (prompt.meta.last_notified ?? prompt.meta.created_at)
+                              : prompt.meta.created_at
+                          }
+                          invertProgress={prompt.meta.recurrence.type === 'interval'}
+                          recurrence={prompt.meta.recurrence.type === 'interval' && prompt.meta.recurrence.intervalMinutes ? {
+                            type: 'interval',
+                            intervalMinutes: prompt.meta.recurrence.intervalMinutes
+                          } : undefined}
                         />
                       </div>
                     ) : prompt.meta.scheduled_time && !isInTrash ? (
                       /* 一次性任务：显示倒计时 */
                       <ChronoCard
+                        key={`chrono-${prompt.meta.id}-${prompt.meta.scheduled_time}`}
                         targetDate={prompt.meta.scheduled_time}
                         startDate={prompt.meta.created_at}
                         isUrgent={new Date(prompt.meta.scheduled_time).getTime() - Date.now() < 3600000}
@@ -2477,6 +3153,7 @@ export function PromptList() {
               </SpotlightCard>
               </div>
             )})}
+            </div>
           </div>
 
           {/* Empty State */}
@@ -2596,7 +3273,7 @@ export function PromptList() {
                       <div className="flex gap-2">
                         <button
                           type="button"
-                          onClick={() => setNewPrompt({...newPrompt, recurrence: undefined})}
+                          onClick={() => setNewPrompt({...newPrompt, type: 'TASK', recurrence: undefined})}
                           className={`flex-1 px-4 py-2 rounded-lg border transition-all flex items-center justify-center gap-2 ${
                             !newPrompt.recurrence?.enabled
                               ? 'bg-rose-500 text-white border-rose-500'
@@ -2609,7 +3286,8 @@ export function PromptList() {
                         <button
                           type="button"
                           onClick={() => setNewPrompt({
-                            ...newPrompt, 
+                            ...newPrompt,
+                            type: 'TASK', // 🔥 修复：选择重复任务时自动设置 type 为 TASK
                             scheduledTime: '',
                             recurrence: { type: 'daily', time: '09:00', enabled: true }
                           })}

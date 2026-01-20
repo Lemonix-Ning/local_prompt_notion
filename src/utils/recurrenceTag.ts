@@ -22,6 +22,12 @@ export function generateRecurrenceTag(config: RecurrenceConfig): string {
     
     case 'monthly':
       return generateMonthlyTag(config.monthDays || []);
+
+    case 'interval': {
+      const m = config.intervalMinutes;
+      if (!m || m <= 0) return '每隔?分钟';
+      return `每隔${m}分钟`;
+    }
     
     default:
       return '重复';
@@ -143,9 +149,10 @@ export function generateScheduledTimeTag(scheduledTime: string): string {
 /**
  * 计算重复任务的下一次触发时间
  * @param config 重复配置
+ * @param baselineStr interval 模式的基准时间（last_notified 或 created_at），ISO 8601
  * @returns ISO 8601 格式的下一次触发时间
  */
-export function getNextTriggerTime(config: RecurrenceConfig): string {
+export function getNextTriggerTime(config: RecurrenceConfig, baselineStr?: string): string {
   if (!config.enabled) return '';
   
   const now = new Date();
@@ -155,6 +162,24 @@ export function getNextTriggerTime(config: RecurrenceConfig): string {
   const todayTrigger = new Date(now.getFullYear(), now.getMonth(), now.getDate(), hours, minutes, 0, 0);
   
   switch (config.type) {
+    case 'interval': {
+      const intervalMinutes = config.intervalMinutes;
+      if (!intervalMinutes || intervalMinutes <= 0) return now.toISOString();
+
+      const baseline = baselineStr ? new Date(baselineStr) : now;
+      const baseMs = baseline.getTime();
+      const nowMs = now.getTime();
+      const intervalMs = intervalMinutes * 60 * 1000;
+
+      if (nowMs <= baseMs) {
+        return new Date(baseMs + intervalMs).toISOString();
+      }
+
+      const elapsed = nowMs - baseMs;
+      const steps = Math.floor(elapsed / intervalMs) + 1;
+      return new Date(baseMs + steps * intervalMs).toISOString();
+    }
+
     case 'daily': {
       // 每天触发：如果今天的时间还没到，返回今天；否则返回明天
       if (todayTrigger > now) {

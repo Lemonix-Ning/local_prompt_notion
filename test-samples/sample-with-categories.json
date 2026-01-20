@@ -1,0 +1,16 @@
+[
+  {
+    "title": "Test Prompt 1",
+    "content": "This is test content 1",
+    "category_path": "Test Category/Subcategory",
+    "tags": ["test", "sample"],
+    "type": "NOTE"
+  },
+  {
+    "title": "Test Prompt 2",
+    "content": "This is test content 2",
+    "category_path": "Another Category",
+    "tags": ["test"],
+    "type": "NOTE"
+  }
+]

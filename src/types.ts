@@ -16,13 +16,15 @@ export interface ModelConfig {
  * 重复任务配置
  */
 export interface RecurrenceConfig {
-  type: 'daily' | 'weekly' | 'monthly';
+  type: 'daily' | 'weekly' | 'monthly' | 'interval';
   // 每周的哪几天 (0-6, 0=周日)
   weekDays?: number[];
   // 每月的哪几天 (1-31)
   monthDays?: number[];
   // 每天的触发时间 (HH:mm 格式)
   time: string;
+  // 间隔触发（每 N 分钟）
+  intervalMinutes?: number;
   // 是否启用
   enabled: boolean;
 }

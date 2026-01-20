@@ -1,18 +1,18 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
-  "productName": "PromptManager",
+  "productName": "Lumina",
   "version": "1.0.0",
-  "identifier": "com.promptmanager.desktop",
+  "identifier": "com.lumina.desktop",
   "build": {
     "frontendDist": "../dist",
     "devUrl": "http://localhost:3000",
     "beforeDevCommand": "npm run dev:client",
-    "beforeBuildCommand": "npm run build:sidecar && if exist .env.tauri (copy /Y .env.tauri .env) else (echo VITE_USE_MOCK=false> .env & echo VITE_API_BASE=http://localhost:3002/api>> .env) && npm run build"
+    "beforeBuildCommand": "npm run build:sidecar && (if exist .env.tauri (copy /Y .env.tauri .env) else (echo VITE_USE_MOCK=false> .env & echo VITE_API_BASE=http://localhost:3002/api>> .env)) && npm run build"
   },
   "app": {
     "windows": [
       {
-        "title": "PromptManager - 提示词管理器",
+        "title": "Lumina",
         "width": 1200,
         "height": 800,
         "resizable": true,
