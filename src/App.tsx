@@ -27,26 +27,68 @@ import { Upload } from 'lucide-react';
  * - 路径描边 (Path Tracing): 线条自动绘制效果
  * - 等轴投影 (Isometric Projection): "L" 形 Logo
  * - 能量注入 (Fill & Glow): 填充颜色 + 发光质感
+ * 
+ * 🚀 智能关闭策略：
+ * - 第一次启动（需要复制示例数据）：等待数据加载完成
+ * - 后续启动（数据已存在）：最短 1.2 秒动画后关闭
  */
 interface SplashScreenProps {
   onComplete?: () => void;
+  dataReady?: boolean; // 数据是否已加载完成
 }
 
-function SplashScreen({ onComplete }: SplashScreenProps) {
+function SplashScreen({ onComplete, dataReady = false }: SplashScreenProps) {
   const [exiting, setExiting] = useState(false);
+  const [minAnimationComplete, setMinAnimationComplete] = useState(false);
+
+  // 🔥 首次渲染时立即隐藏 HTML 层的启动画面，并显示 Tauri 窗口
+  useEffect(() => {
+    const initialSplash = document.getElementById('initial-splash');
+    if (initialSplash) {
+      initialSplash.style.display = 'none';
+    }
+    
+    // 🔥 显示 Tauri 窗口（如果是桌面应用）
+    if (typeof window !== 'undefined' && window.location.port === '1420') {
+      (async () => {
+        try {
+          const { getCurrentWindow } = await import('@tauri-apps/api/window');
+          const appWindow = getCurrentWindow();
+          await appWindow.show();
+        } catch (error) {
+          console.error('Failed to show window:', error);
+        }
+      })();
+    }
+  }, []);
 
   useEffect(() => {
-    // 编排动画时间轴
-    // 1.8s: 线条绘制(1.2s) + 填充(0.6s) 完成后开始退出
-    const t1 = setTimeout(() => setExiting(true), 1800);
-    // 2.4s: 退出动画(0.6s)完成后回调
-    const t2 = setTimeout(() => onComplete?.(), 2400);
+    // 🚀 最短动画时间：1.2 秒（线条绘制 + 填充）
+    const minAnimationTimer = setTimeout(() => {
+      setMinAnimationComplete(true);
+    }, 1200);
     
     return () => {
-      clearTimeout(t1);
-      clearTimeout(t2);
+      clearTimeout(minAnimationTimer);
     };
-  }, [onComplete]);
+  }, []);
+
+  useEffect(() => {
+    // 🚀 智能关闭：当最短动画完成 AND 数据已加载时，开始退出
+    if (minAnimationComplete && dataReady && !exiting) {
+      setExiting(true);
+      
+      // 退出动画 0.4 秒后回调
+      const exitTimer = setTimeout(() => {
+        onComplete?.();
+      }, 400);
+      
+      // 不需要 cleanup，因为我们只设置一次 timer
+      return () => {
+        clearTimeout(exitTimer);
+      };
+    }
+  }, [minAnimationComplete, dataReady, onComplete]); // 移除 exiting 从依赖数组
 
   return (
     <div 
@@ -118,6 +160,13 @@ function SplashScreen({ onComplete }: SplashScreenProps) {
         <p className="splash-text splash-subtext-animate text-sm text-muted-foreground">
           本地优先的 AI 卡片与任务工作台
         </p>
+        
+        {/* 🚀 加载提示 - 只在数据未加载完成且动画已完成时显示 */}
+        {minAnimationComplete && !dataReady && (
+          <div className="mt-6 text-sm text-muted-foreground animate-pulse">
+            正在初始化数据...
+          </div>
+        )}
       </div>
     </div>
   );
@@ -294,16 +343,66 @@ function AppContent({ initialRoot }: AppContentProps) {
 
   useEffect(() => {
     (async () => {
+      // 🔥 如果是桌面应用，先启动后端（如果需要）
+      if (typeof window !== 'undefined' && window.location.port === '1420') {
+        try {
+          const { invoke } = await import('@tauri-apps/api/core');
+          await invoke('start_backend_if_needed');
+          
+          // 🚀 等待后端完全启动（健康检查）
+          const maxRetries = 30; // 最多等待 15 秒
+          let retries = 0;
+          let backendReady = false;
+          
+          while (retries < maxRetries && !backendReady) {
+            try {
+              const controller = new AbortController();
+              const timeoutId = setTimeout(() => controller.abort(), 500);
+              
+              const response = await fetch('http://localhost:3002/health', {
+                method: 'GET',
+                signal: controller.signal,
+              });
+              
+              clearTimeout(timeoutId);
+              
+              if (response.ok) {
+                backendReady = true;
+                break;
+              }
+            } catch (error) {
+              // 后端还没准备好，继续等待
+            }
+            
+            retries++;
+            await new Promise(resolve => setTimeout(resolve, 500));
+          }
+          
+          if (!backendReady) {
+            console.warn('Backend health check timeout, proceeding anyway');
+          }
+        } catch (error) {
+          console.error('Failed to start backend:', error);
+        }
+      }
+      
       if (initialRoot === '/api') {
         try {
           await api.trash.visit(10);
         } catch {
         }
       }
-      startupTimer.mark('vault_scan_start');
-      await loadVault(initialRoot);
-      startupTimer.mark('vault_scanned');
-      setDataLoaded(true);
+      
+      try {
+        startupTimer.mark('vault_scan_start');
+        await loadVault(initialRoot);
+        startupTimer.mark('vault_scanned');
+        setDataLoaded(true);
+      } catch (error) {
+        console.error('Failed to load vault:', error);
+        // 即使加载失败，也标记为已加载，避免永远卡在启动页面
+        setDataLoaded(true);
+      }
     })();
   }, [initialRoot, loadVault]);
 
@@ -337,16 +436,19 @@ function AppContent({ initialRoot }: AppContentProps) {
     }
   }, [dataLoaded, splashComplete]);
 
-  // 只有当数据加载完成 AND Splash 动画完成时才显示主界面
+  // 🚀 智能 Splash 显示逻辑：
+  // - 显示 Splash 直到数据加载完成 AND Splash 动画完成
+  // - 将 dataLoaded 状态传递给 SplashScreen，让它根据数据状态决定何时退出
   const showSplash = !dataLoaded || !splashComplete;
 
   if (showSplash) {
-    return <SplashScreen onComplete={handleSplashComplete} />;
+    return <SplashScreen onComplete={handleSplashComplete} dataReady={dataLoaded} />;
   }
 
   return (
     <div 
-      className="relative flex h-screen w-full bg-transparent text-foreground font-sans overflow-hidden selection:bg-primary/30"
+      className="relative flex h-screen w-full bg-transparent text-foreground font-sans selection:bg-primary/30"
+      style={{ overflow: 'visible' }}
       onDragOver={handleGlobalDragOver}
       onDragLeave={handleGlobalDragLeave}
       onDrop={handleGlobalDrop}

@@ -44,7 +44,8 @@ const pkgTarget = 'node20-win-x64';
 console.log(`[sidecar] PKG_CACHE_PATH=${pkgCacheDir}`);
 console.log(`[sidecar] target=${pkgTarget}`);
 
-execSync(`pkg "${serverEntry}" --targets ${pkgTarget} --output "${tmpOut}"`, {
+// 🚀 优化：添加 GZip 压缩以减少二进制文件大小
+execSync(`pkg "${serverEntry}" --targets ${pkgTarget} --output "${tmpOut}" --compress GZip`, {
   stdio: 'inherit',
   env: {
     ...process.env,

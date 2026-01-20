@@ -396,16 +396,21 @@ export function startPerformanceMonitoring(interval: number = 5000): () => void 
       const memStats = memoryMonitor.getStats();
       const cpuUsage = cpuMonitor.getAverageUsage(60);
       
-      console.log('[Performance]', {
-        memory: `${memStats.current.toFixed(1)}MB (peak: ${memStats.peak.toFixed(1)}MB, trend: ${memStats.trend})`,
-        cpu: `${cpuUsage.toFixed(1)}%`,
-      });
+      // 🚀 优化：只在内存或 CPU 异常时才输出日志
+      const shouldLog = memStats.current > 100 || cpuUsage > 5 || memStats.trend === 'growing';
+      
+      if (shouldLog) {
+        console.log('[Performance]', {
+          memory: `${memStats.current.toFixed(1)}MB (peak: ${memStats.peak.toFixed(1)}MB, trend: ${memStats.trend})`,
+          cpu: `${cpuUsage.toFixed(1)}%`,
+        });
+      }
 
       // Check for memory leaks
       if (memoryMonitor.detectLeak()) {
         console.warn('⚠️ Potential memory leak detected');
       }
-    }, 30000); // Log every 30 seconds
+    }, 60000); // 🚀 优化：从 30 秒改为 60 秒，减少日志频率
 
     return () => {
       clearInterval(memoryInterval);

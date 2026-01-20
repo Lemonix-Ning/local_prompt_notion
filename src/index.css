@@ -955,12 +955,20 @@ code {
   background: transparent;
 }
 
+/* 🔥 确保代码块不影响后续内容 */
+:root.dark .markdown-body pre {
+  contain: layout style paint;
+  will-change: auto;
+}
+
+/* 🔥 深色模式 - 柔和护眼配色 */
 :root.dark .markdown-body .hljs-keyword,
 :root.dark .markdown-body .hljs-selector-tag,
 :root.dark .markdown-body .hljs-literal,
 :root.dark .markdown-body .hljs-section,
 :root.dark .markdown-body .hljs-link {
-  color: #c084fc;
+  color: #bb9af7; /* 柔和紫色 - 关键字 */
+  font-weight: 500;
 }
 
 :root.dark .markdown-body .hljs-string,
@@ -974,25 +982,39 @@ code {
 :root.dark .markdown-body .hljs-variable,
 :root.dark .markdown-body .hljs-template-tag,
 :root.dark .markdown-body .hljs-template-variable {
-  color: #4ade80;
+  color: #9ece6a; /* 柔和绿色 - 字符串 */
 }
 
 :root.dark .markdown-body .hljs-comment,
 :root.dark .markdown-body .hljs-quote,
 :root.dark .markdown-body .hljs-deletion,
 :root.dark .markdown-body .hljs-meta {
-  color: #71717a;
+  color: #565f89; /* 低对比度灰色 - 注释 */
+  font-style: italic;
 }
 
 :root.dark .markdown-body .hljs-number,
 :root.dark .markdown-body .hljs-regexp,
 :root.dark .markdown-body .hljs-literal,
 :root.dark .markdown-body .hljs-built_in {
-  color: #f97316;
+  color: #ff9e64; /* 柔和橙色 - 数字 */
 }
 
 :root.dark .markdown-body .hljs-function .hljs-title {
-  color: #60a5fa;
+  color: #7aa2f7; /* 柔和蓝色 - 函数名 */
+  font-weight: 500;
+}
+
+:root.dark .markdown-body .hljs-tag {
+  color: #f7768e; /* 柔和红色 - HTML 标签 */
+}
+
+:root.dark .markdown-body .hljs-attr {
+  color: #bb9af7; /* 柔和紫色 - 属性 */
+}
+
+:root.dark .markdown-body .hljs-params {
+  color: #e0af68; /* 柔和黄色 - 参数 */
 }
 
 /* 代码块语法高亮覆盖 - 浅色模式 */
@@ -1006,12 +1028,20 @@ code {
   background: transparent;
 }
 
+/* 🔥 确保代码块不影响后续内容 */
+.markdown-body pre {
+  contain: layout style paint;
+  will-change: auto;
+}
+
+/* 🔥 浅色模式 - 柔和护眼配色 */
 .markdown-body .hljs-keyword,
 .markdown-body .hljs-selector-tag,
 .markdown-body .hljs-literal,
 .markdown-body .hljs-section,
 .markdown-body .hljs-link {
-  color: #9333ea;
+  color: #7c3aed; /* 柔和紫色 - 关键字 */
+  font-weight: 500;
 }
 
 .markdown-body .hljs-string,
@@ -1025,25 +1055,39 @@ code {
 .markdown-body .hljs-variable,
 .markdown-body .hljs-template-tag,
 .markdown-body .hljs-template-variable {
-  color: #16a34a;
+  color: #059669; /* 柔和绿色 - 字符串 */
 }
 
 .markdown-body .hljs-comment,
 .markdown-body .hljs-quote,
 .markdown-body .hljs-deletion,
 .markdown-body .hljs-meta {
-  color: #a1a1aa;
+  color: #94a3b8; /* 低对比度灰色 - 注释 */
+  font-style: italic;
 }
 
 .markdown-body .hljs-number,
 .markdown-body .hljs-regexp,
 .markdown-body .hljs-literal,
 .markdown-body .hljs-built_in {
-  color: #ea580c;
+  color: #ea580c; /* 柔和橙色 - 数字 */
 }
 
 .markdown-body .hljs-function .hljs-title {
-  color: #2563eb;
+  color: #2563eb; /* 柔和蓝色 - 函数名 */
+  font-weight: 500;
+}
+
+.markdown-body .hljs-tag {
+  color: #dc2626; /* 柔和红色 - HTML 标签 */
+}
+
+.markdown-body .hljs-attr {
+  color: #7c3aed; /* 柔和紫色 - 属性 */
+}
+
+.markdown-body .hljs-params {
+  color: #d97706; /* 柔和黄色 - 参数 */
 }
 
 /* 任务列表样式 */

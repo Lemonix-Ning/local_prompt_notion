@@ -1658,33 +1658,46 @@ export function PromptList() {
   };
 
   const handleClose = async () => {
-    // 简单测试：先用 window.confirm 测试按钮是否工作
-    const useNativeConfirm = false; // 设为 true 可以测试原生对话框
+    // 🔥 版本检查：清理旧的 localStorage 键
+    const storageVersion = localStorage.getItem('closePreferenceVersion');
+    if (storageVersion !== '2') {
+      // 清理旧版本的数据
+      localStorage.removeItem('closePreference');
+      localStorage.removeItem('minimizeCount');
+      localStorage.removeItem('lastCloseChoice');
+      localStorage.removeItem('consecutiveCloseCount');
+      localStorage.setItem('closePreferenceVersion', '2');
+    }
     
-    if (useNativeConfirm) {
-      const result = window.confirm('最小化到托盘？\n\n点击"确定"最小化到托盘\n点击"取消"完全退出');
-      
-      if (result) {
-        try {
-          const { getCurrentWindow } = await import('@tauri-apps/api/window');
-          const appWindow = getCurrentWindow();
-          await appWindow.hide();
-        } catch (e) {
-          // Hide error
-        }
-      } else {
-        try {
-          const { invoke } = await import('@tauri-apps/api/core');
-          await invoke('exit_app');
-        } catch (e) {
-          // Exit error
-        }
+    // 🔥 检查用户的关闭行为偏好
+    const closePreference = localStorage.getItem('closePreference');
+    const lastChoice = localStorage.getItem('lastCloseChoice'); // 'minimize' 或 'exit'
+    const consecutiveCount = parseInt(localStorage.getItem('consecutiveCloseCount') || '0', 10);
+    
+    // 🔥 如果已经记住了偏好，直接执行
+    if (closePreference === 'minimize') {
+      try {
+        const { getCurrentWindow } = await import('@tauri-apps/api/window');
+        const appWindow = getCurrentWindow();
+        await appWindow.hide();
+      } catch (hideError) {
+        console.error('Failed to hide window:', hideError);
       }
       return;
     }
     
+    if (closePreference === 'exit') {
+      try {
+        const { invoke } = await import('@tauri-apps/api/core');
+        await invoke('exit_app');
+      } catch (invokeError) {
+        console.error('Failed to exit app:', invokeError);
+      }
+      return;
+    }
+    
+    // 弹出确认对话框
     try {
-      // 弹出确认对话框
       const result = await confirm({
         title: '关闭窗口',
         message: '选择关闭方式：',
@@ -1694,35 +1707,68 @@ export function PromptList() {
       });
       
       // result 为 true 表示点击了"最小化到托盘"
-      // result 为 false 表示点击了"完全退出"
       if (result === true) {
+        // 🔥 检查是否与上次选择一致
+        if (lastChoice === 'minimize') {
+          // 连续选择最小化，增加计数
+          const newCount = consecutiveCount + 1;
+          localStorage.setItem('consecutiveCloseCount', newCount.toString());
+          localStorage.setItem('lastCloseChoice', 'minimize');
+          
+          // 🔥 如果连续选择了 5 次，记住这个偏好
+          if (newCount >= 5) {
+            localStorage.setItem('closePreference', 'minimize');
+          }
+        } else {
+          // 切换了选择，重置计数
+          localStorage.setItem('consecutiveCloseCount', '1');
+          localStorage.setItem('lastCloseChoice', 'minimize');
+        }
+        
         // 最小化到托盘（隐藏窗口）
         try {
           const { getCurrentWindow } = await import('@tauri-apps/api/window');
           const appWindow = getCurrentWindow();
           await appWindow.hide();
         } catch (hideError) {
-          // Failed to hide window
+          console.error('Failed to hide window:', hideError);
         }
       } else if (result === false) {
-        // 完全退出程序 - 通过 Tauri 命令
+        // 🔥 检查是否与上次选择一致
+        if (lastChoice === 'exit') {
+          // 连续选择退出，增加计数
+          const newCount = consecutiveCount + 1;
+          localStorage.setItem('consecutiveCloseCount', newCount.toString());
+          localStorage.setItem('lastCloseChoice', 'exit');
+          
+          // 🔥 如果连续选择了 5 次，记住这个偏好
+          if (newCount >= 5) {
+            localStorage.setItem('closePreference', 'exit');
+          }
+        } else {
+          // 切换了选择，重置计数
+          localStorage.setItem('consecutiveCloseCount', '1');
+          localStorage.setItem('lastCloseChoice', 'exit');
+        }
+        
+        // 完全退出程序
         try {
           const { invoke } = await import('@tauri-apps/api/core');
           await invoke('exit_app');
         } catch (invokeError) {
+          console.error('Failed to exit app:', invokeError);
           // 如果 invoke 失败，尝试直接销毁窗口
           try {
             const { getCurrentWindow } = await import('@tauri-apps/api/window');
             const appWindow = getCurrentWindow();
             await appWindow.destroy();
           } catch (destroyError) {
-            // Destroy also failed
+            console.error('Failed to destroy window:', destroyError);
           }
         }
       }
-      // 如果 result 是其他值（如 undefined），不做任何操作
     } catch (error) {
-      // Error handling close
+      console.error('Error handling close:', error);
     }
   };
 

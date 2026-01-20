@@ -20,9 +20,11 @@ import { memo, useRef, useEffect } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeHighlight from 'rehype-highlight';
+import rehypeRaw from 'rehype-raw';
 import { Copy, Check } from 'lucide-react';
 import { useState, useCallback } from 'react';
 import { LazyLoadManager } from '../utils/lazyLoad';
+import hljs from 'highlight.js';
 
 // 导入 highlight.js 样式（在 index.css 中会覆盖）
 import 'highlight.js/styles/github-dark.css';
@@ -38,7 +40,7 @@ function CodeBlock({
   children, 
   className, 
   theme,
-  inline 
+  inline,
 }: { 
   children: React.ReactNode; 
   className?: string; 
@@ -51,16 +53,25 @@ function CodeBlock({
   const match = /language-(\w+)/.exec(className || '');
   const language = match ? match[1] : '';
   
+  // 🔥 递归提取所有文本内容，保留换行
+  const extractText = (node: any): string => {
+    if (typeof node === 'string') return node;
+    if (Array.isArray(node)) return node.map(extractText).join('');
+    if (node?.props?.children) return extractText(node.props.children);
+    return '';
+  };
+  
+  const codeText = extractText(children);
+  
   const handleCopy = useCallback(async () => {
-    const text = String(children).replace(/\n$/, '');
     try {
-      await navigator.clipboard.writeText(text);
+      await navigator.clipboard.writeText(codeText);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } catch (err) {
       // Failed to copy
     }
-  }, [children]);
+  }, [codeText]);
   
   // 行内代码
   if (inline) {
@@ -73,6 +84,7 @@ function CodeBlock({
           fontFamily: 'ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace',
           backgroundColor: theme === 'dark' ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.06)',
           color: theme === 'dark' ? '#e879f9' : '#9333ea',
+          whiteSpace: 'pre-wrap', // 🔥 保留空白但允许换行
         }}
       >
         {children}
@@ -82,7 +94,15 @@ function CodeBlock({
   
   // 代码块
   return (
-    <div style={{ position: 'relative', marginBottom: '16px' }}>
+    <div 
+      style={{ 
+        position: 'relative', 
+        marginTop: '16px',
+        marginBottom: '16px',
+        clear: 'both', // 🔥 清除浮动
+        isolation: 'isolate', // 🔥 创建新的层叠上下文
+      }}
+    >
       {/* 语言标签 + 复制按钮 */}
       <div
         style={{
@@ -142,12 +162,25 @@ function CodeBlock({
           padding: '16px',
           borderRadius: '0 0 8px 8px',
           backgroundColor: theme === 'dark' ? 'rgba(0,0,0,0.4)' : 'rgba(0,0,0,0.03)',
-          overflow: 'auto',
+          overflowX: 'auto', // 🔥 水平滚动
+          overflowY: 'auto', // 🔥 垂直滚动
           fontSize: '14px',
           lineHeight: 1.6,
+          whiteSpace: 'pre', // 🔥 保留空白字符和换行，不自动换行
+          tabSize: 2, // 🔥 设置 tab 宽度为 2 个空格
+          maxWidth: '100%', // 🔥 限制最大宽度
+          boxSizing: 'border-box', // 🔥 包含 padding 在宽度内
         }}
       >
-        <code className={className} style={{ fontFamily: 'ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace' }}>
+        <code 
+          className={className} 
+          style={{ 
+            fontFamily: 'ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace',
+            whiteSpace: 'pre', // 🔥 保留空白字符和换行，不自动换行
+            display: 'inline-block', // 🔥 改为 inline-block 以支持水平滚动
+            minWidth: '100%', // 🔥 最小宽度为容器宽度
+          }}
+        >
           {children}
         </code>
       </pre>
@@ -225,6 +258,67 @@ function LazyImage({ src, alt }: { src?: string; alt?: string }) {
 }
 
 const MarkdownRendererComponent = ({ content, theme, className }: MarkdownRendererProps) => {
+  // 🔥 检测是否包含裸露的 HTML 标签（不在代码块中）
+  const hasRawHTML = () => {
+    // 移除代码块后检查是否还有 HTML 标签
+    const withoutCodeBlocks = content
+      .replace(/```[\s\S]*?```/g, '') // 移除代码块
+      .replace(/`[^`]+`/g, ''); // 移除行内代码
+    
+    // 检查是否有 HTML 标签
+    return /<[a-z][\s\S]*>/i.test(withoutCodeBlocks);
+  };
+
+  // 🔥 如果包含裸露的 HTML，显示为带语法高亮的代码块
+  if (hasRawHTML()) {
+    return (
+      <div 
+        className={`markdown-body ${className || ''}`}
+        style={{
+          color: theme === 'dark' ? '#e4e4e7' : '#18181b',
+          lineHeight: 1.7,
+          fontSize: '16px',
+        }}
+      >
+        <div style={{
+          marginBottom: '16px',
+          padding: '8px 12px',
+          borderRadius: '8px 8px 0 0',
+          backgroundColor: theme === 'dark' ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.03)',
+          borderBottom: `1px solid ${theme === 'dark' ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)'}`,
+          fontSize: '12px',
+          fontWeight: 500,
+          color: theme === 'dark' ? 'rgba(255,255,255,0.5)' : 'rgba(0,0,0,0.5)',
+          textTransform: 'uppercase',
+          letterSpacing: '0.5px',
+        }}>
+          HTML/JavaScript Code
+        </div>
+        <pre
+          className="hljs"
+          style={{
+            margin: 0,
+            padding: '16px',
+            borderRadius: '0 0 8px 8px',
+            backgroundColor: theme === 'dark' ? 'rgba(0,0,0,0.4)' : 'rgba(0,0,0,0.03)',
+            overflowX: 'auto',
+            overflowY: 'auto',
+            fontSize: '14px',
+            lineHeight: 1.6,
+            whiteSpace: 'pre',
+            fontFamily: 'ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace',
+            border: `1px solid ${theme === 'dark' ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)'}`,
+            borderTop: 'none',
+          }}
+          dangerouslySetInnerHTML={{
+            __html: hljs.highlight(content, { language: 'html' }).value
+          }}
+        />
+      </div>
+    );
+  }
+
+  // 🔥 否则正常渲染 Markdown
   return (
     <div 
       className={`markdown-body ${className || ''}`}
@@ -236,7 +330,13 @@ const MarkdownRendererComponent = ({ content, theme, className }: MarkdownRender
     >
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
-        rehypePlugins={[rehypeHighlight]}
+        rehypePlugins={[
+          rehypeRaw, // 🔥 解析 HTML
+          [rehypeHighlight, { 
+            ignoreMissing: true,
+            subset: false,
+          }],
+        ]}
         components={{
           // 标题
           h1: ({ children }) => (
@@ -356,8 +456,11 @@ const MarkdownRendererComponent = ({ content, theme, className }: MarkdownRender
             );
           },
           
-          // pre 标签 - 让 code 组件处理
-          pre: ({ children }) => <>{children}</>,
+          // pre 标签 - 完全由 code 组件处理，避免嵌套问题
+          pre: ({ children }) => {
+            // 🔥 直接返回 children，不添加额外的 wrapper
+            return <>{children}</>;
+          },
           
           // 链接
           a: ({ href, children }) => (

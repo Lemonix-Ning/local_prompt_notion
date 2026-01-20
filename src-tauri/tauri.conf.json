@@ -12,17 +12,21 @@
   "app": {
     "windows": [
       {
+        "label": "main",
         "title": "Lumina",
         "width": 1200,
         "height": 800,
         "resizable": true,
         "fullscreen": false,
         "decorations": false,
-        "transparent": false,
+        "transparent": true,
         "center": true,
         "minWidth": 800,
         "minHeight": 600,
-        "dragDropEnabled": false
+        "dragDropEnabled": false,
+        "visibleOnAllWorkspaces": true,
+        "contentProtected": false,
+        "visible": true
       }
     ],
     "security": {

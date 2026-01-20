@@ -405,7 +405,10 @@ export function AppProvider({ children, adapter }: AppProviderProps) {
       dispatch({ type: 'LOAD_VAULT', payload: fileSystem });
       lastRootPathRef.current = rootPath;
     } catch (error) {
+      console.error('Failed to load vault:', error);
       dispatch({ type: 'SET_LOADING', payload: false });
+      // 重新抛出错误，让调用者知道加载失败
+      throw error;
     }
   }, [adapter]);
 

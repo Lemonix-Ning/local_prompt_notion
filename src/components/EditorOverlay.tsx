@@ -1788,7 +1788,7 @@ export function EditorOverlay({ promptId, originCardId, onClose, promptIds, onNa
 
               {/* 正文编辑区 */}
               <div 
-                style={{ maxWidth: '1200px', flex: 1, display: 'flex', flexDirection: 'column', width: '100%', position: 'relative' }}
+                style={{ flex: 1, display: 'flex', flexDirection: 'column', width: '100%', position: 'relative' }}
                 onDoubleClick={(e) => {
                   // 🔥 双击容器空白区域（不是 textarea 内部）时切换专注模式
                   const target = e.target as HTMLElement;

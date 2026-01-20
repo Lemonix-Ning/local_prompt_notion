@@ -89,17 +89,7 @@ async function startServer() {
     // 🚀 Performance Optimization: Start HTTP server immediately
     // Move vault scanning and cleanup to background after server is ready
     app.listen(PORT, () => {
-      console.log(`
-╔════════════════════════════════════════════════╗
-║   Local Prompt Notion - Backend Server        ║
-╠════════════════════════════════════════════════╣
-║   Server:  http://localhost:${PORT}             ║
-║   API:     http://localhost:${PORT}/api         ║
-║   Vault:   ${VAULT_ROOT}
-║   Trash:   ${TRASH_RETENTION_DAYS} days retention
-║   Status:  ⚡ Ready (background init in progress)
-╚════════════════════════════════════════════════╝
-      `);
+      console.log(`✓ Lumina Backend Ready - http://localhost:${PORT} | Vault: ${VAULT_ROOT}`);
       
       // Background initialization after server is ready
       setImmediate(async () => {
@@ -107,14 +97,13 @@ async function startServer() {
           // Cleanup expired trash items in background
           const cleanupResult = await cleanupTrash(VAULT_ROOT, TRASH_RETENTION_DAYS);
           if (cleanupResult.deletedCount > 0) {
-            console.log(`[STARTUP] Cleaned up ${cleanupResult.deletedCount} expired trash items`);
+            console.log(`[STARTUP] Cleaned ${cleanupResult.deletedCount} trash items`);
           }
           
           // Start interval task scheduler
           scheduler.start();
-          console.log('[STARTUP] Scheduler started ✅');
         } catch (error) {
-          console.error('[STARTUP] Background initialization error:', error);
+          console.error('[STARTUP] Init error:', error);
         }
       });
     });
