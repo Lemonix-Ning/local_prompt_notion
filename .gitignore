@@ -86,6 +86,9 @@ DEVLOG.md
 # Kiro AI assistant files (keep local, not for version control)
 .kiro/
 
+# AI context files (keep local, not for version control)
+.ai/
+
 # Documentation drafts (optional working documents)
 docs/tst.md
 

@@ -219,9 +219,7 @@ function LazyImage({ src, alt }: { src?: string; alt?: string }) {
     
     // 如果是 assets/ 开头的相对路径，转换为 API 路径
     if (src.startsWith('assets/')) {
-      const apiBaseUrl = typeof window !== 'undefined' && window.location.port === '1420' 
-        ? 'http://localhost:3002'
-        : 'http://localhost:3001';
+      const apiBaseUrl = 'http://localhost:3001';
       
       // 提取 promptId 和 fileName
       // 格式: assets/promptId/fileName

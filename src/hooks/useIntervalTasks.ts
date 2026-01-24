@@ -1,26 +1,27 @@
 /**
- * useIntervalTasks - 极简版 Interval 任务 Hook (with Adaptive Polling)
+ * useIntervalTasks - 极简版 Interval 任务 Hook
  * 
  * 核心原则：
- * 1. 前端只负责轮询后端 API
+ * 1. 前端只负责通知展示
  * 2. 不做任何时间计算
  * 3. 不维护任何黑名单或状态
- * 4. 使用自适应轮询：可见时 2s，隐藏时 30s，无任务时暂停
  */
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import { PromptData } from '../types';
-import { AdaptivePollingManager } from '../utils/adaptivePolling';
 
-interface PendingTask extends PromptData {
-  nextTriggerAt: number;
-}
+type PendingTask = PromptData;
 
 export function useIntervalTasks(apiBaseUrl: string, enabled: boolean = true) {
   const [pendingTasks, setPendingTasks] = useState<PendingTask[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const pollingManagerRef = useRef<AdaptivePollingManager | null>(null);
+  const isTauriEnv = typeof window !== 'undefined' && (
+    (window as any).__TAURI_INTERNALS__ ||
+    (window as any).__TAURI__ ||
+    window.location.protocol === 'tauri:' ||
+    (window.location.protocol === 'https:' && window.location.hostname === 'tauri.localhost')
+  );
 
   /**
    * 获取待通知的任务
@@ -32,15 +33,15 @@ export function useIntervalTasks(apiBaseUrl: string, enabled: boolean = true) {
       setIsLoading(true);
       setError(null);
 
-      const response = await fetch(`${apiBaseUrl}/api/interval-tasks/pending`);
-      const result = await response.json();
-
-      if (result.success) {
-        const tasks = result.data || [];
-        setPendingTasks(tasks);
-      } else {
-        setError(result.error || 'Failed to fetch pending tasks');
+      if (isTauriEnv) {
+        const { invoke } = await import('@tauri-apps/api/core');
+        const tasks = await invoke<PendingTask[]>('get_pending_tasks');
+        setPendingTasks(tasks || []);
+        return;
       }
+
+      setPendingTasks([]);
+      return;
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown error');
     } finally {
@@ -53,18 +54,14 @@ export function useIntervalTasks(apiBaseUrl: string, enabled: boolean = true) {
    */
   const acknowledgeTask = async (taskId: string) => {
     try {
-      const response = await fetch(`${apiBaseUrl}/api/interval-tasks/${taskId}/acknowledge`, {
-        method: 'POST',
-      });
-      const result = await response.json();
-
-      if (result.success) {
-        // 从待通知列表中移除
+      if (isTauriEnv) {
+        const { invoke } = await import('@tauri-apps/api/core');
+        await invoke('acknowledge_task', { taskId });
         setPendingTasks(prev => prev.filter(t => t.meta.id !== taskId));
         return { success: true };
-      } else {
-        return { success: false, error: result.error };
       }
+
+      return { success: false, error: 'Unsupported' };
     } catch (err) {
       console.error('[useIntervalTasks] Error acknowledging task:', err);
       return { success: false, error: err instanceof Error ? err.message : 'Unknown error' };
@@ -76,13 +73,13 @@ export function useIntervalTasks(apiBaseUrl: string, enabled: boolean = true) {
    */
   const notifyVisibility = async (isVisible: boolean) => {
     try {
-      await fetch(`${apiBaseUrl}/api/interval-tasks/visibility`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ isVisible }),
-      });
+      if (isTauriEnv) {
+        const { invoke } = await import('@tauri-apps/api/core');
+        await invoke('set_window_visibility', { isVisible });
+        return;
+      }
+
+      return;
     } catch (err) {
       console.error('[useIntervalTasks] Error notifying visibility:', err);
     }
@@ -93,54 +90,54 @@ export function useIntervalTasks(apiBaseUrl: string, enabled: boolean = true) {
    */
   useEffect(() => {
     if (!enabled) {
-      // Cleanup polling manager if disabled
-      if (pollingManagerRef.current) {
-        pollingManagerRef.current.destroy();
-        pollingManagerRef.current = null;
-      }
       return;
     }
 
-    // Create adaptive polling manager
-    pollingManagerRef.current = new AdaptivePollingManager(
-      fetchPendingTasks,
-      {
-        foregroundInterval: 2000,   // 2s when visible (more responsive)
-        backgroundInterval: 30000,  // 30s when hidden (save resources)
-        idleInterval: 2000,         // Keep polling even when no active tasks
-      }
-    );
+    if (isTauriEnv) {
+      let unlisten: (() => void) | undefined;
+      let visibility: boolean | null = null;
 
-    // Set visibility change callback to notify backend
-    pollingManagerRef.current.setVisibilityChangeCallback((isVisible: boolean) => {
-      notifyVisibility(isVisible);
-    });
+      const applyVisibility = (isVisible: boolean) => {
+        if (visibility === isVisible) return;
+        visibility = isVisible;
+        notifyVisibility(isVisible);
+      };
 
-    // Start polling
-    pollingManagerRef.current.start();
+      const handleVisibility = () => {
+        applyVisibility(document.visibilityState === 'visible');
+      };
 
-    // Update task state based on pending tasks
-    const updateTaskState = () => {
-      if (pollingManagerRef.current) {
-        pollingManagerRef.current.setHasActiveTasks(pendingTasks.length > 0);
-      }
-    };
-    updateTaskState();
+      const handleFocus = () => {
+        applyVisibility(true);
+      };
 
-    return () => {
-      if (pollingManagerRef.current) {
-        pollingManagerRef.current.destroy();
-        pollingManagerRef.current = null;
-      }
-    };
-  }, [enabled, apiBaseUrl]);
+      const handleBlur = () => {
+        applyVisibility(false);
+      };
 
-  // Update polling manager when pending tasks change
-  useEffect(() => {
-    if (pollingManagerRef.current) {
-      pollingManagerRef.current.setHasActiveTasks(pendingTasks.length > 0);
+      (async () => {
+        const { listen } = await import('@tauri-apps/api/event');
+        unlisten = await listen('task_due', () => {
+          fetchPendingTasks();
+        });
+        await fetchPendingTasks();
+        applyVisibility(document.visibilityState === 'visible');
+      })();
+
+      document.addEventListener('visibilitychange', handleVisibility);
+      window.addEventListener('focus', handleFocus);
+      window.addEventListener('blur', handleBlur);
+
+      return () => {
+        if (unlisten) unlisten();
+        document.removeEventListener('visibilitychange', handleVisibility);
+        window.removeEventListener('focus', handleFocus);
+        window.removeEventListener('blur', handleBlur);
+      };
     }
-  }, [pendingTasks.length]);
+
+    return;
+  }, [enabled, apiBaseUrl, isTauriEnv]);
 
   return {
     pendingTasks,

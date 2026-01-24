@@ -896,49 +896,6 @@ function AppContent({ initialRoot }: AppContentProps) {
 
   useEffect(() => {
     (async () => {
-      // 🔥 如果是桌面应用，先启动后端（如果需要）
-      if (typeof window !== 'undefined' && window.location.port === '1420') {
-        try {
-          const { invoke } = await import('@tauri-apps/api/core');
-          await invoke('start_backend_if_needed');
-          
-          // 🚀 等待后端完全启动（健康检查）
-          const maxRetries = 30; // 最多等待 15 秒
-          let retries = 0;
-          let backendReady = false;
-          
-          while (retries < maxRetries && !backendReady) {
-            try {
-              const controller = new AbortController();
-              const timeoutId = setTimeout(() => controller.abort(), 500);
-              
-              const response = await fetch('http://localhost:3002/health', {
-                method: 'GET',
-                signal: controller.signal,
-              });
-              
-              clearTimeout(timeoutId);
-              
-              if (response.ok) {
-                backendReady = true;
-                break;
-              }
-            } catch (error) {
-              // 后端还没准备好，继续等待
-            }
-            
-            retries++;
-            await new Promise(resolve => setTimeout(resolve, 500));
-          }
-          
-          if (!backendReady) {
-            console.warn('Backend health check timeout, proceeding anyway');
-          }
-        } catch (error) {
-          console.error('Failed to start backend:', error);
-        }
-      }
-      
       if (initialRoot === '/api') {
         try {
           await api.trash.visit(10);
@@ -1094,7 +1051,8 @@ function AppContent({ initialRoot }: AppContentProps) {
  * 根组件
  */
 export default function App() {
-  const useMock = import.meta.env.VITE_USE_MOCK === 'true';
+  const isTauriEnv = typeof window !== 'undefined' && window.location.port === '1420';
+  const useMock = import.meta.env.VITE_USE_MOCK === 'true' || isTauriEnv;
   const adapter = useMemo(
     () => (useMock ? new MockFileSystemAdapter() : new ApiFileSystemAdapter()),
     [useMock]

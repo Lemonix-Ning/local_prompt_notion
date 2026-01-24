@@ -4,7 +4,7 @@ export interface PerformanceMetrics {
   // Startup metrics
   startup: {
     totalTime: number;              // ms to interactive
-    sidecarStartTime: number;       // ms to sidecar ready
+    backendStartTime: number;       // ms to backend ready
     vaultScanTime: number;          // ms to complete vault scan
     firstPaintTime: number;         // ms to first paint
     timeToInteractive: number;      // ms to fully interactive

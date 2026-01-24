@@ -124,7 +124,7 @@ function createBaseline() {
     // Startup metrics (estimated - will be measured in real app)
     startup: {
       totalTime: 0, // To be measured
-      sidecarStartTime: 0, // To be measured
+      backendStartTime: 0, // To be measured
       vaultScanTime: 0, // To be measured
       firstPaintTime: 0, // To be measured
       timeToInteractive: 0, // To be measured

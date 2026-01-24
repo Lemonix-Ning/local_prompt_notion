@@ -68,8 +68,8 @@ Lumina 是一个全栈本地应用，用于沉淀与复用 AI 相关内容卡片
 - **导入/导出**: 支持提示词的导入与导出
 - **快速导入**: 支持拖拽导入 Markdown 与 JSON 文件（自动解析标题/分类/冲突，并给出导入结果提示）
 
-#### **任务与提醒（Interval Task System V2）**
-- **后端调度**: 后端 1s 定时调度 + 前端 5s 轮询，降低资源消耗并避免前端生命周期导致的重复通知
+#### **任务与提醒（Rust Scheduler）**
+- **后端调度**: Rust Scheduler 运行于 Tauri 主进程，事件驱动通知前端
 - **时间基线**: 以 `meta.last_notified` 作为唯一持久化基线字段，保证倒计时与通知一致
 - **确认语义**: 关闭通知时推进 `last_notified`，进入下一周期
 
@@ -92,7 +92,8 @@ Lumina 是一个全栈本地应用，用于沉淀与复用 AI 相关内容卡片
 - CSS Variables (主题系统)
 
 **后端**:
-- Express.js 4.18.2 (Web 框架)
+- Rust Scheduler (桌面端 interval 任务调度)
+- Express.js 4.18.2 (Web API)
 - Node.js 文件系统 API (持久化)
 - RESTful API 设计
 
@@ -104,7 +105,10 @@ Lumina 是一个全栈本地应用，用于沉淀与复用 AI 相关内容卡片
 ### 目录结构
 
 ```
-local_prompt_notion/
+Lumina/
+├── .ai/                          # AI 认知基础设施
+│   ├── context/                  # 协作规则/架构/项目状态
+│   └── index/                    # AI 结构化索引
 ├── src/                          # 前端源代码
 │   ├── components/               # React 组件
 │   │   ├── Sidebar.tsx           # 左侧导航(分类树、主题切换)
@@ -127,7 +131,7 @@ local_prompt_notion/
 │   ├── mockFileSystemAdapter.ts  # Mock 适配器(浏览器/前端安全)
 │   ├── types.ts                  # TypeScript 类型定义
 │   ├── index.css                 # 全局样式(主题系统)
-│   └── main.tsx                  # 入口文件
+│   └── index.tsx                 # 入口文件
 ├── server/                       # 后端源代码
 │   ├── index.js                  # 服务器入口
 │   ├── routes/                   # Express 路由
@@ -140,19 +144,17 @@ local_prompt_notion/
 │       └── fileSystem.js         # 文件系统工具函数
 ├── src-tauri/                    # Tauri 桌面应用
 │   ├── src/
-│   │   └── lib.rs                # Rust 主程序
+│   │   ├── lib.rs                # Tauri 命令入口
+│   │   └── scheduler/            # Rust 任务调度器
 │   ├── tauri.conf.json           # Tauri 配置
 │   └── Cargo.toml                # Rust 依赖
 ├── scripts/                      # 工具脚本
-│   ├── cleanup-temp-folders.js   # 清理临时文件夹
+│   ├── check-desktop-build.cjs   # 桌面构建前置检查
+│   ├── cleanup-temp-folders.cjs  # 清理临时文件夹
 │   └── cleanup-temp-folders.bat  # Windows 清理脚本
-├── sample-vault/                 # 示例数据目录（提交到 Git）
-│   ├── Business/                 # 业务分类
-│   ├── Coding/                   # 编程分类
-│   ├── Creative Writing/         # 创意写作分类
-│   └── trash/                    # 回收站
+├── docs/                         # 交互规范与说明
 ├── vault/                        # 本地数据目录（不提交，.gitignore）
-├── test-vault/                   # 测试数据目录（不提交，.gitignore）
+├── test-samples/                 # 导入样例数据
 ├── package.json                  # 前端依赖配置
 ├── vite.config.ts                # Vite 配置
 ├── tsconfig.json                 # TypeScript 配置
@@ -160,16 +162,15 @@ local_prompt_notion/
 ```
 
 **目录说明**:
-- `sample-vault/` - 示例数据，包含在 Git 仓库中，供新用户参考
 - `vault/` - 本地实际使用的数据目录，不提交到 Git
-- `test-vault/` - 测试用数据目录，不提交到 Git
+- `test-samples/` - 导入样例数据（JSON/Markdown）
 - 所有 `*_restored_*` 文件夹都是临时文件，应该删除
 
 ### 数据模型
 
 **Vault 结构**: 以文件系统目录为基础
 ```
-sample-vault/
+vault/
 ├── Category1/
 │   ├── prompt1/
 │   │   ├── meta.json            # 元数据
@@ -217,7 +218,7 @@ sample-vault/
 
 1. **克隆或解压项目**
 ```bash
-cd local_prompt_notion
+cd Lumina
 ```
 
 2. **安装前端依赖**
@@ -238,7 +239,7 @@ cd ..
 ```bash
 npm run dev
 ```
-打开 `http://localhost:3002`
+打开 `http://localhost:5173`
 
 #### 方式 2: 使用 API 模式(需要后端,数据持久化到本地)
 
@@ -252,7 +253,7 @@ npm start
 **终端 2 - 启动前端开发服务器**:
 ```bash
 npm run dev:client
-# 打开 http://localhost:3002
+# 打开 http://localhost:3000
 ```
 
 或使用一个命令同时启动前后端:
@@ -277,18 +278,13 @@ npm run build
 npm run desktop:build
 
 # 这个命令会自动：
-# 1. 构建后端 sidecar
-# 2. 构建前端
-# 3. 打包桌面应用
+# 1. 构建前端
+# 2. 打包桌面应用
 ```
 
 **手动构建（如果需要）：**
 
 ```bash
-# 1. 先构建后端 sidecar
-npm run build:sidecar
-
-# 2. 再构建桌面应用
 npm run tauri build
 ```
 
@@ -305,7 +301,7 @@ src-tauri/target/release/
 
 **桌面应用特性**:
 - 原生Windows应用体验
-- 内置后端服务器（端口 3002），无需单独启动
+- 桌面构建默认使用 Mock 适配器（文件 API 迁移后可恢复持久化）
 - 完整功能，包含所有主题和交互特性
 - 支持绿色版(免安装)和安装包两种分发方式
 - 数据存储在可执行文件旁边的 `vault/` 目录
@@ -400,15 +396,16 @@ src-tauri/target/release/
 **Vault 管理**:
 - `GET /api/vault/scan` - 扫描并返回整个 Vault 结构
 - `POST /api/vault/normalize` - 依据真实目录回填所有提示词的 `meta.category_path`/`meta.category`
+- `GET /api/vault/info` - 获取 Vault 统计信息
 
 **提示词操作**:
 - `GET /api/prompts` - 获取所有提示词
 - `GET /api/prompts/:id` - 获取单个提示词
 - `POST /api/prompts` - 创建提示词
 - `PUT /api/prompts/:id` - 更新提示词(支持 `categoryPath` 触发目录移动)
-- `DELETE /api/prompts/:id` - 删除提示词(移到回收站)
-- `DELETE /api/prompts/:id/permanent` - 永久删除提示词
+- `DELETE /api/prompts/:id` - 删除提示词(移到回收站，`?permanent=true` 永久删除)
 - `POST /api/prompts/:id/restore` - 从回收站恢复提示词
+- `POST /api/prompts/batch-delete` - 批量删除提示词
 
 **分类操作**:
 - `GET /api/categories` - 获取所有分类
@@ -417,7 +414,12 @@ src-tauri/target/release/
 - `DELETE /api/categories` - 删除分类
 
 **搜索**:
-- `GET /api/search?query=...` - 搜索提示词
+- `GET /api/search?q=...` - 搜索提示词
+- `GET /api/tags` - 获取所有标签
+
+**图片**:
+- `POST /api/images/upload` - 上传图片
+- `GET /api/images/:promptId/:fileName` - 获取图片
 
 **回收站**:
 - `POST /api/trash/visit` - 网站打开/刷新计数 + 自动清理(阈值 10)
@@ -521,7 +523,7 @@ VITE_USE_MOCK=false
 
 **后端** (环境变量):
 ```bash
-# Vault 数据目录(默认: ./sample-vault)
+# Vault 数据目录(默认: ./vault)
 VAULT_PATH=/path/to/vault
 
 # 服务器端口(默认: 3001)
@@ -609,8 +611,8 @@ npm run lint
 
 - **不要提交本地敏感信息**
   - `.env`(包含本地 API 地址/配置)
-  - `sample-vault/`(除非你明确要更新示例数据)
-  - `sample-vault/trash/.trash-visits.json`(运行时状态文件)
+  - `vault/`(本地数据目录)
+  - `vault/trash/.trash-visits.json`(运行时状态文件)
 - **避免引入嵌套 Git 仓库导致“子模块不洁净”提示**
   - 如果某目录是独立仓库(例如 `Dashboard/`),请确保它自身是 clean(没有未跟踪文件如 `.vs/`)
   - 若不需要独立仓库,请不要在子目录保留 `.git`
@@ -629,7 +631,7 @@ MIT License
 
 ## Contact
 
-- Project Link: https://github.com/Lemonix-Ning/local_prompt_notion
+- Project Link: (请更新为实际仓库地址)
 
 ## Acknowledgments
 
@@ -639,7 +641,7 @@ MIT License
 
 ##  故障排查
 
-详见 [TROUBLESHOOTING.md](./TROUBLESHOOTING.md)
+详见 docs/ 目录下的说明文档
 
 ### 桌面版窗口按钮/拖拽失效
 
@@ -662,4 +664,4 @@ MIT License
 **最后更新**: 2026 年 1 月 20 日  
 **版本**: 1.0.0  
 **构建状态**: 通过  
-**主要更新**: Interval 任务系统 V2、快速导入（拖拽 Markdown/JSON）、图片引用式链接优化、性能与交互修复
+**主要更新**: Interval 任务系统 Rust 调度器、快速导入（拖拽 Markdown/JSON）、图片引用式链接优化、性能与交互修复

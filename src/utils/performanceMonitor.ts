@@ -52,8 +52,8 @@ export class StartupTimer {
         if (timings.first_paint) {
           breakdown.push(`First paint: ${timings.first_paint.toFixed(0)}ms`);
         }
-        if (timings.sidecar_ready) {
-          breakdown.push(`Sidecar ready: ${timings.sidecar_ready.toFixed(0)}ms`);
+        if (timings.backend_ready) {
+          breakdown.push(`Backend ready: ${timings.backend_ready.toFixed(0)}ms`);
         }
         if (timings.vault_scan_start) {
           breakdown.push(`Vault scan start: ${timings.vault_scan_start.toFixed(0)}ms`);
@@ -94,7 +94,7 @@ export class StartupTimer {
   getElapsed(markerName: string): number {
     const markerTime = this.markers.get(markerName);
     if (!markerTime) {
-      // 🔥 静默处理：某些标记（如 sidecar_ready）只在特定环境（桌面端）存在
+      // 🔥 静默处理：某些标记只在特定环境存在
       // 不需要警告，直接返回 0
       return 0;
     }
@@ -109,7 +109,7 @@ export class StartupTimer {
     const end = this.markers.get(endMarker);
     
     if (!start || !end) {
-      // 🔥 静默处理：某些标记（如 sidecar_ready, vault_scanned）只在特定环境存在
+      // 🔥 静默处理：某些标记只在特定环境存在
       // 不需要警告，直接返回 0
       return 0;
     }
@@ -136,8 +136,8 @@ export class StartupTimer {
   getStartupMetrics(): PerformanceMetrics['startup'] {
     return {
       totalTime: this.getElapsed('interactive') || 0,
-      sidecarStartTime: this.getElapsed('sidecar_ready') || 0,
-      vaultScanTime: this.getDuration('sidecar_ready', 'vault_scanned') || 0,
+      backendStartTime: this.getElapsed('backend_ready') || 0,
+      vaultScanTime: this.getDuration('backend_ready', 'vault_scanned') || 0,
       firstPaintTime: this.getElapsed('first_paint') || 0,
       timeToInteractive: this.getElapsed('interactive') || 0,
     };

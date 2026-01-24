@@ -1,9 +1,9 @@
 # 一键清理 Tauri 构建中间产物，仅保留最终产物
-# 仅保留 promptmanager.exe、server.exe、bundle 下的安装包
+# 仅保留 Lumina.exe、bundle 下的安装包
 # 其余 .rlib/.rmeta/.dll/.pdb/build 目录等全部清理
 
 $releaseDir = "src-tauri/target/release"
-$keepFiles = @("promptmanager.exe", "server.exe")
+$keepFiles = @("Lumina.exe")
 $keepDirs = @("bundle")
 
 # 删除 release 下除最终产物和 bundle 外的所有文件

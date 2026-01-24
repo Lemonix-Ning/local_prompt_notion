@@ -18,12 +18,6 @@ let allGood = true;
 // 检查项列表
 const checks = [
   {
-    name: 'Sidecar 二进制文件',
-    path: 'src-tauri/binaries/server-x86_64-pc-windows-msvc.exe',
-    required: true,
-    fix: 'npm run build:sidecar'
-  },
-  {
     name: '.env.tauri 配置文件',
     path: '.env.tauri',
     required: true,
@@ -69,24 +63,11 @@ const envTauriPath = path.join(rootDir, '.env.tauri');
 if (fs.existsSync(envTauriPath)) {
   const content = fs.readFileSync(envTauriPath, 'utf-8');
   
-  // 检查端口配置
-  if (content.includes('localhost:3002')) {
-    console.log('   ✓ API 端口配置正确 (3002)');
-  } else if (content.includes('localhost:3001')) {
-    console.log('   ✗ API 端口配置错误 (应该是 3002，不是 3001)');
-    console.log('   修复: 将 .env.tauri 中的端口改为 3002');
-    allGood = false;
-  } else {
-    console.log('   ⚠ 无法确定 API 端口配置');
-  }
-  
   // 检查 MOCK 配置
-  if (content.includes('VITE_USE_MOCK=false')) {
-    console.log('   ✓ MOCK 模式已禁用');
+  if (content.includes('VITE_USE_MOCK=true')) {
+    console.log('   ✓ MOCK 模式已启用');
   } else {
-    console.log('   ✗ MOCK 模式应该禁用');
-    console.log('   修复: 设置 VITE_USE_MOCK=false');
-    allGood = false;
+    console.log('   ⚠ 未检测到 VITE_USE_MOCK=true');
   }
 } else {
   console.log('   ✗ .env.tauri 文件不存在');

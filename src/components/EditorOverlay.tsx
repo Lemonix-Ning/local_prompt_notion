@@ -508,9 +508,7 @@ export function EditorOverlay({ promptId, originCardId, onClose, promptIds, onNa
               const base64Data = reader.result as string;
               
               // 上传图片
-              const apiBaseUrl = typeof window !== 'undefined' && window.location.port === '1420' 
-                ? 'http://localhost:3002'
-                : 'http://localhost:3001';
+              const apiBaseUrl = 'http://localhost:3001';
               
               const response = await fetch(`${apiBaseUrl}/api/images/upload`, {
                 method: 'POST',
@@ -1910,9 +1908,7 @@ export function EditorOverlay({ promptId, originCardId, onClose, promptIds, onNa
                             
                             const promptId = parts[1];
                             const fileName = parts.slice(2).join('/');
-                            const apiBaseUrl = typeof window !== 'undefined' && window.location.port === '1420' 
-                              ? 'http://localhost:3002'
-                              : 'http://localhost:3001';
+                            const apiBaseUrl = 'http://localhost:3001';
                             const imageUrl = `${apiBaseUrl}/api/images/${promptId}/${fileName}`;
                             
                             return (

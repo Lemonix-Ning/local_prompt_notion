@@ -8,7 +8,6 @@ const cors = require('cors');
 const path = require('path');
 const fs = require('fs').promises;
 const { cleanupTrash } = require('./utils/fileSystem');
-const TaskScheduler = require('./utils/intervalTaskScheduler');
 const RequestQueue = require('./utils/requestQueue');
 const { createQueueMiddleware } = require('./utils/requestQueue');
 
@@ -20,8 +19,6 @@ const VAULT_ROOT = rawVaultPath || path.join(__dirname, '../vault');
 // 回收站保留天数
 const TRASH_RETENTION_DAYS = 5;
 
-// 创建任务调度器
-const scheduler = new TaskScheduler(VAULT_ROOT);
 
 // 🚀 Performance: Create request queue with max 10 concurrent requests
 const requestQueue = new RequestQueue(10);
@@ -40,7 +37,6 @@ const categoryRoutes = require('./routes/categories');
 const promptRoutes = require('./routes/prompts');
 const searchRoutes = require('./routes/search');
 const trashRoutes = require('./routes/trash');
-const intervalTaskRoutes = require('./routes/intervalTasks');
 const imageRoutes = require('./routes/images');
 
 // 注册路由
@@ -51,7 +47,6 @@ app.use('/api/search', searchRoutes);
 app.use('/api/tags', searchRoutes);
 app.use('/api/images', imageRoutes);
 app.use('/api/trash', trashRoutes);
-app.use('/api/interval-tasks', intervalTaskRoutes);
 
 // 静态文件服务(图片)
 app.use('/api/images', express.static(VAULT_ROOT));
@@ -100,8 +95,6 @@ async function startServer() {
             console.log(`[STARTUP] Cleaned ${cleanupResult.deletedCount} trash items`);
           }
           
-          // Start interval task scheduler
-          scheduler.start();
         } catch (error) {
           console.error('[STARTUP] Init error:', error);
         }
@@ -124,5 +117,5 @@ async function startServer() {
 
 startServer();
 
-// 导出 app、VAULT_ROOT 和 scheduler 供路由使用
-module.exports = { app, VAULT_ROOT, scheduler };
+// 导出 app、VAULT_ROOT
+module.exports = { app, VAULT_ROOT };

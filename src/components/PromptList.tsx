@@ -208,15 +208,7 @@ export function PromptList() {
   const handleAlertDismissRef = useRef<(() => Promise<void>) | null>(null);
   
   // 🔥 V2: 使用后端调度器，前端只负责轮询和显示
-  const isTauriEnv = typeof window !== 'undefined' && (
-    (window as any).__TAURI_INTERNALS__ ||
-    (window as any).__TAURI__ ||
-    window.location.protocol === 'tauri:' ||
-    (window.location.protocol === 'https:' && window.location.hostname === 'tauri.localhost')
-  );
-  const apiBaseUrl = isTauriEnv
-    ? 'http://localhost:3002'  // Tauri 桌面端
-    : 'http://localhost:3001'; // Web 端
+  const apiBaseUrl = 'http://localhost:3001';
   
   const { pendingTasks, acknowledgeTask, refresh: refreshPendingTasks } = useIntervalTasks(apiBaseUrl, true);
 

@@ -8,7 +8,7 @@ A. 闲聊引擎 (Chat Engine)
 
 触发机制：基于随机时间间隔的递归定时器。
 
-频率：每隔 8 ~ 15 秒 触发一次对话，保持一种“偶尔活跃”的节奏，不造成干扰。
+频率：每隔 10 ~ 20 秒 触发一次对话，保持一种“偶尔活跃”的节奏，不造成干扰。
 
 词库 (Vocabulary)：
 
@@ -67,8 +67,8 @@ useEffect(() => {
      // 2. 闭嘴 (3秒后)
      setTimeout(() => setChatMessage(null), 3000);
      
-     // 3. 下一次说话 (8-15秒后)
-     timeoutRef.current = setTimeout(talk, 8000 + Math.random() * 7000);
+     // 3. 下一次说话 (10-20秒后)
+     timeoutRef.current = setTimeout(talk, 10000 + Math.random() * 10000);
   };
   
   // 启动

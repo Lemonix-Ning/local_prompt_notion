@@ -2,13 +2,13 @@
  * API 客户端
  * 与后端服务通信
  * 
- * 端口隔离策略（完全基于运行环境检测，不依赖环境变量）：
- * - 网页端：只使用 3001 端口
- * - 桌面端（Tauri）：只使用 3002 端口
+ * 端口策略（完全基于运行环境检测，不依赖环境变量）：
+ * - 网页端：使用 3001 端口
+ * - 桌面端（Tauri）：默认使用 Mock，不走 API
  */
 
 const WEB_API_BASE = 'http://localhost:3001/api';
-const DESKTOP_API_BASE = 'http://localhost:3002/api';
+const DESKTOP_API_BASE = 'http://localhost:3001/api';
 
 // 🔥 检测是否在 Tauri 桌面环境中
 const isTauri = (() => {
@@ -32,8 +32,8 @@ const isTauri = (() => {
   return false;
 })();
 
-// 🔥 严格的端口隔离：完全基于 Tauri 检测，忽略环境变量
-// 桌面端 = 3002，网页端 = 3001，互不干扰
+// 🔥 端口选择：完全基于 Tauri 检测，忽略环境变量
+// 桌面端默认走 Mock，这里与网页端保持一致
 const API_BASE: string = isTauri ? DESKTOP_API_BASE : WEB_API_BASE;
 
 interface ApiResponse<T = any> {
