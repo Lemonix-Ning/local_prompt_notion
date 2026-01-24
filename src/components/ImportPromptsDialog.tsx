@@ -79,6 +79,20 @@ export const ImportPromptsDialog: React.FC<ImportPromptsDialogProps> = ({
   const importStructure = useMemo(() => {
     if (prompts.length === 0) return null;
 
+    const normalizeCategoryPath = (rawPath?: string) => {
+      if (!rawPath) return '';
+      let normalized = rawPath.replace(/\\/g, '/');
+      const rootPath = state.fileSystem?.root?.replace(/\\/g, '/');
+      if (rootPath && normalized.startsWith(rootPath)) {
+        normalized = normalized.slice(rootPath.length);
+      }
+      const vaultIndex = normalized.toLowerCase().indexOf('/vault/');
+      if (vaultIndex >= 0) {
+        normalized = normalized.slice(vaultIndex + '/vault/'.length);
+      }
+      return normalized.replace(/^\/+/, '');
+    };
+
     // 检查是否有分类路径
     const hasCategories = prompts.some(p => p.category_path);
 
@@ -106,14 +120,15 @@ export const ImportPromptsDialog: React.FC<ImportPromptsDialogProps> = ({
     };
 
     prompts.forEach(prompt => {
-      if (!prompt.category_path) {
+      const cleanedPath = normalizeCategoryPath(prompt.category_path);
+      if (!cleanedPath) {
         // 没有分类路径的放到根目录
         root.prompts.push(prompt);
         return;
       }
 
       // 分割路径
-      const parts = prompt.category_path.split('/').filter(p => p.trim());
+      const parts = cleanedPath.split('/').filter(p => p.trim());
       let current = root;
 
       // 构建树
@@ -137,7 +152,7 @@ export const ImportPromptsDialog: React.FC<ImportPromptsDialogProps> = ({
       type: 'tree' as const,
       root,
     };
-  }, [prompts]);
+  }, [prompts, state.fileSystem?.root]);
 
   // 获取所有分类的扁平列表（过滤掉 trash）
   const allCategories = useMemo(() => {
@@ -361,16 +376,12 @@ export const ImportPromptsDialog: React.FC<ImportPromptsDialogProps> = ({
           >
             <FolderIcon className="w-4 h-4 text-indigo-500 dark:text-indigo-400 flex-shrink-0" />
             <span className="font-medium">{node.name}</span>
-            <span className="text-xs text-gray-500 dark:text-gray-400">
-              ({node.prompts.length})
-            </span>
           </div>
         )}
 
-        {/* 渲染当前节点的提示词 */}
         {hasPrompts && (
           <div className="space-y-1" style={{ paddingLeft: `${(level + 1) * 16}px` }}>
-            {node.prompts.slice(0, 3).map((prompt: ImportPromptData, index: number) => (
+            {node.prompts.slice(0, 8).map((prompt: ImportPromptData, index: number) => (
               <div key={index} className="flex items-center gap-2 py-0.5 text-gray-600 dark:text-gray-400">
                 <FileText className="w-3 h-3 flex-shrink-0" />
                 <span className="truncate text-xs">{prompt.title}</span>
@@ -379,15 +390,14 @@ export const ImportPromptsDialog: React.FC<ImportPromptsDialogProps> = ({
                 )}
               </div>
             ))}
-            {node.prompts.length > 3 && (
+            {node.prompts.length > 8 && (
               <div className="text-xs text-gray-500 dark:text-gray-400 pl-5">
-                还有 {node.prompts.length - 3} 个...
+                还有 {node.prompts.length - 8} 个...
               </div>
             )}
           </div>
         )}
 
-        {/* 递归渲染子节点 */}
         {hasChildren && (
           <div>
             {Array.from(node.children.values()).map((child: any) =>
@@ -499,26 +509,32 @@ export const ImportPromptsDialog: React.FC<ImportPromptsDialogProps> = ({
 
                       <div className="max-h-48 overflow-y-auto bg-white dark:bg-zinc-900 rounded border border-gray-200 dark:border-zinc-700 p-2.5">
                         {importStructure.type === 'flat' ? (
-                          // 扁平结构：显示提示词数量
-                          <div className="text-sm text-gray-600 dark:text-gray-400">
-                            <p className="mb-1.5">无分类结构，将导入到选定的目标分类</p>
-                            <p className="text-indigo-600 dark:text-indigo-400 font-medium">
-                              共 {prompts.length} 个提示词
-                            </p>
+                          <div className="space-y-2">
+                            <div className="text-xs text-gray-500 dark:text-gray-400">
+                              无分类结构，将导入到选定的目标分类
+                            </div>
+                            <div className="space-y-1">
+                              {importStructure.prompts.slice(0, 10).map((prompt: ImportPromptData, index: number) => (
+                                <div key={index} className="flex items-center gap-2 py-0.5 text-gray-600 dark:text-gray-400">
+                                  <FileText className="w-3 h-3 flex-shrink-0" />
+                                  <span className="truncate text-xs">{prompt.title}</span>
+                                  {prompt.type === 'TASK' && (
+                                    <Clock className="w-3 h-3 text-rose-500 flex-shrink-0" />
+                                  )}
+                                </div>
+                              ))}
+                              {importStructure.prompts.length > 10 && (
+                                <div className="text-xs text-gray-500 dark:text-gray-400 pl-5">
+                                  还有 {importStructure.prompts.length - 10} 个...
+                                </div>
+                              )}
+                            </div>
                           </div>
                         ) : (
-                          // 树形结构：显示分类树
                           <div>
                             <div className="text-xs text-gray-500 dark:text-gray-400 mb-2">
                               包含分类结构，将按照 JSON 中的路径导入
                             </div>
-                            {importStructure.root.prompts.length > 0 && (
-                              <div className="mb-1.5">
-                                <div className="text-xs text-gray-600 dark:text-gray-400 font-medium mb-1">
-                                  根目录 ({importStructure.root.prompts.length})
-                                </div>
-                              </div>
-                            )}
                             {Array.from(importStructure.root.children.values()).map((child: any) =>
                               renderTreeNode(child, 0)
                             )}

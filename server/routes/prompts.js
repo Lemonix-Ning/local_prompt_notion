@@ -259,6 +259,12 @@ router.delete('/:id', async (req, res, next) => {
       // 永久删除
       await permanentlyDeletePrompt(promptPath);
       
+      // 🔥 修复 Bug 8: 从待通知队列中移除已删除的任务
+      const { scheduler } = require('../index');
+      if (scheduler && scheduler.pendingNotifications) {
+        scheduler.pendingNotifications.delete(id);
+      }
+      
       // 🚀 Performance: Invalidate cache after data modification
       const cache = getApiCache();
       if (cache) {
@@ -272,6 +278,12 @@ router.delete('/:id', async (req, res, next) => {
     } else {
       // 移动到回收站
       await deletePrompt(promptPath, VAULT_ROOT);
+      
+      // 🔥 修复 Bug 8: 从待通知队列中移除已删除的任务
+      const { scheduler } = require('../index');
+      if (scheduler && scheduler.pendingNotifications) {
+        scheduler.pendingNotifications.delete(id);
+      }
       
       // 🚀 Performance: Invalidate cache after data modification
       const cache = getApiCache();
@@ -475,6 +487,24 @@ router.post('/import', async (req, res, next) => {
   try {
     const { prompts, categoryPath, conflictStrategy = 'rename' } = req.body;
 
+    const normalizeCategoryPath = (rawPath) => {
+      if (!rawPath) return '';
+      let cleanedPath = rawPath.replace(/\\/g, '/');
+      const vaultMarker = '/vault/';
+      const lastVaultIndex = cleanedPath.toLowerCase().lastIndexOf(vaultMarker);
+      if (lastVaultIndex >= 0) {
+        cleanedPath = cleanedPath.slice(lastVaultIndex + vaultMarker.length);
+      }
+      if (path.isAbsolute(cleanedPath)) {
+        const relative = path.relative(VAULT_ROOT, cleanedPath);
+        if (relative && !relative.startsWith('..')) {
+          cleanedPath = relative;
+        }
+      }
+      cleanedPath = cleanedPath.replace(/^[a-zA-Z]:/, '');
+      return cleanedPath.replace(/^\/+/, '');
+    };
+
     // 验证输入
     if (!prompts || !Array.isArray(prompts) || prompts.length === 0) {
       return res.status(400).json({
@@ -553,7 +583,10 @@ router.post('/import', async (req, res, next) => {
             // JSON 自带分类结构，将其作为子目录放到用户选择的目录下
             // 例如：用户选择 "测试1"，JSON 中是 "工作/产品管理"
             // 最终路径：vault/测试1/工作/产品管理/
-            finalCategoryPath = path.join(targetCategoryPath, promptData.category_path);
+            const normalizedPath = normalizeCategoryPath(promptData.category_path);
+            finalCategoryPath = normalizedPath
+              ? path.join(targetCategoryPath, normalizedPath)
+              : targetCategoryPath;
           } else {
             // JSON 没有分类结构，直接放到用户选择的目录
             finalCategoryPath = targetCategoryPath;
@@ -562,7 +595,10 @@ router.post('/import', async (req, res, next) => {
           // 用户选择了根目录
           if (promptData.category_path) {
             // JSON 自带分类结构，放到根目录下的对应路径
-            finalCategoryPath = path.join(VAULT_ROOT, promptData.category_path);
+            const normalizedPath = normalizeCategoryPath(promptData.category_path);
+            finalCategoryPath = normalizedPath
+              ? path.join(VAULT_ROOT, normalizedPath)
+              : VAULT_ROOT;
           } else {
             // JSON 没有分类结构，放到根目录
             finalCategoryPath = VAULT_ROOT;

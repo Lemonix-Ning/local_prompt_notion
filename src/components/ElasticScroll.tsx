@@ -15,6 +15,8 @@ export const ElasticScroll = forwardRef<HTMLDivElement, ElasticScrollProps>(
 
   const [offsetY, setOffsetY] = useState(0);
   const [isRubberBanding, setIsRubberBanding] = useState(false);
+  const [isScrolling, setIsScrolling] = useState(false);
+  const scrollTimerRef = useRef<number | null>(null);
 
   const transition = useMemo(() => {
     if (isRubberBanding) return 'none';
@@ -34,6 +36,13 @@ export const ElasticScroll = forwardRef<HTMLDivElement, ElasticScrollProps>(
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
+
+    const clearScrollTimer = () => {
+      if (scrollTimerRef.current) {
+        window.clearTimeout(scrollTimerRef.current);
+        scrollTimerRef.current = null;
+      }
+    };
 
     const clearBounceTimer = () => {
       if (bounceTimerRef.current) {
@@ -94,17 +103,33 @@ export const ElasticScroll = forwardRef<HTMLDivElement, ElasticScrollProps>(
       scheduleBounceBack();
     };
 
+    const handleScroll = () => {
+      setIsScrolling(true);
+      clearScrollTimer();
+      scrollTimerRef.current = window.setTimeout(() => {
+        setIsScrolling(false);
+        scrollTimerRef.current = null;
+      }, 150);
+    };
+
     el.addEventListener('wheel', handleWheel, { passive: false });
+    el.addEventListener('scroll', handleScroll, { passive: true });
 
     return () => {
       clearBounceTimer();
+      clearScrollTimer();
       el.removeEventListener('wheel', handleWheel as EventListener);
+      el.removeEventListener('scroll', handleScroll as EventListener);
     };
   }, []);
 
   return (
     <div className={className} style={{ ...style, overflow: 'hidden' }} onContextMenu={onContextMenu}>
-      <div ref={setRefs} style={{ height: '100%', overflowY: 'auto', overscrollBehavior: 'none' }}>
+      <div
+        ref={setRefs}
+        className={`elastic-scroll-body${isScrolling ? ' is-scrolling' : ''}`}
+        style={{ height: '100%', overflowY: 'auto', overscrollBehavior: 'none' }}
+      >
         <div style={{ transform: `translateY(${offsetY}px)`, transition, height: '100%' }}>{children}</div>
       </div>
     </div>

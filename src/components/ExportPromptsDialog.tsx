@@ -7,6 +7,7 @@ import React, { useState, useMemo, useCallback, useEffect } from 'react';
 import { X, Download, FileJson, CheckCircle, Loader, Folder, FolderOpen } from 'lucide-react';
 import { useApp } from '../AppContext';
 import { useToast } from '../contexts/ToastContext';
+import { useLumi } from '../contexts/LumiContext';
 import api from '../api/client';
 import { NewPromptOverlay } from './NewPromptOverlay';
 
@@ -35,6 +36,7 @@ export const ExportPromptsDialog: React.FC<ExportPromptsDialogProps> = ({
 }) => {
   const { state } = useApp();
   const { showToast } = useToast();
+  const { triggerTransfer } = useLumi();
 
   // 🔥 所有 useState 必须在顶层调用
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -336,6 +338,7 @@ export const ExportPromptsDialog: React.FC<ExportPromptsDialogProps> = ({
     }
 
     setIsExporting(true);
+    triggerTransfer('exporting');
 
     try {
       const response = await api.prompts.export({

@@ -129,36 +129,6 @@
   }
 }
 
-/* 🔥 ChronoAlert 粒子飞散动画 */
-@keyframes particle-fly {
-  0% {
-    transform: translate(-50%, -50%) scale(1);
-    opacity: 1;
-  }
-  100% {
-    transform: translate(calc(-50% + var(--tx)), calc(-50% + var(--ty))) scale(0);
-    opacity: 0;
-  }
-}
-
-/* 🔥 ChronoAlert 消散动画 */
-@keyframes disintegrate {
-  0% {
-    opacity: 1;
-    transform: translateX(-50%) scale(1);
-    filter: blur(0);
-  }
-  100% {
-    opacity: 0;
-    transform: translateX(-50%) scale(0.8);
-    filter: blur(4px);
-  }
-}
-
-.animate-disintegrate {
-  animation: disintegrate 0.4s ease-out forwards;
-}
-
 @keyframes shockwave-flash {
   0% {
     opacity: 0.8;
@@ -263,7 +233,6 @@
 .star-bounce,
 .toast-enter,
 .animate-shrink,
-.animate-disintegrate,
 .quantum-particle,
 .quantum-shockwave,
 .firework-particle {
@@ -407,6 +376,8 @@ body,
 #root {
   background-color: var(--background);
   color: var(--foreground);
+  height: 100%;
+  overflow: hidden;
 }
 
 :root:not(.dark) body,
@@ -458,6 +429,26 @@ code {
 
 ::-webkit-scrollbar-thumb:hover {
   background: rgba(0, 0, 0, 0.22);
+}
+
+/* ElasticScroll: show scrollbar only while scrolling */
+.elastic-scroll-body {
+  scrollbar-width: none;
+  scrollbar-gutter: stable;
+}
+
+.elastic-scroll-body.is-scrolling {
+  scrollbar-width: thin;
+}
+
+.elastic-scroll-body::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+
+.elastic-scroll-body.is-scrolling::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
 }
 
 /* Dark mode scrollbar */
@@ -805,24 +796,6 @@ code {
 /* ========================================
    Chrono Alert & Focus Mode 动画
    ======================================== */
-
-/* 1. 顶部滑入动画 */
-@keyframes slide-down {
-  0% {
-    opacity: 0;
-    transform: translate(-50%, -20px);
-  }
-  100% {
-    opacity: 1;
-    transform: translate(-50%, 0);
-  }
-}
-
-.animate-slide-down {
-  opacity: 0;
-  transform: translate(-50%, -20px);
-  animation: slide-down 0.4s cubic-bezier(0.19, 1, 0.22, 1) forwards;
-}
 
 /* 2. 心跳脉冲动画 */
 @keyframes pulse-red {

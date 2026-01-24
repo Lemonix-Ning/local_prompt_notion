@@ -8,7 +8,7 @@ const cors = require('cors');
 const path = require('path');
 const fs = require('fs').promises;
 const { cleanupTrash } = require('./utils/fileSystem');
-const IntervalTaskScheduler = require('./utils/intervalTaskScheduler');
+const TaskScheduler = require('./utils/intervalTaskScheduler');
 const RequestQueue = require('./utils/requestQueue');
 const { createQueueMiddleware } = require('./utils/requestQueue');
 
@@ -20,8 +20,8 @@ const VAULT_ROOT = rawVaultPath || path.join(__dirname, '../vault');
 // 回收站保留天数
 const TRASH_RETENTION_DAYS = 5;
 
-// 创建 Interval 任务调度器
-const scheduler = new IntervalTaskScheduler(VAULT_ROOT);
+// 创建任务调度器
+const scheduler = new TaskScheduler(VAULT_ROOT);
 
 // 🚀 Performance: Create request queue with max 10 concurrent requests
 const requestQueue = new RequestQueue(10);

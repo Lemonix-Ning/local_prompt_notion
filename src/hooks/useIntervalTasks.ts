@@ -107,7 +107,7 @@ export function useIntervalTasks(apiBaseUrl: string, enabled: boolean = true) {
       {
         foregroundInterval: 2000,   // 2s when visible (more responsive)
         backgroundInterval: 30000,  // 30s when hidden (save resources)
-        idleInterval: 0,            // Pause when no active tasks
+        idleInterval: 2000,         // Keep polling even when no active tasks
       }
     );
 

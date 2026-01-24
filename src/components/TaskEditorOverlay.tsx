@@ -18,6 +18,7 @@ import { useTheme } from '../contexts/ThemeContext';
 import { useApp } from '../AppContext';
 import { X, Clock, Trash2, Calendar, Maximize2, Minimize2, Repeat } from 'lucide-react';
 import { useToast } from '../contexts/ToastContext';
+import { useLumi } from '../contexts/LumiContext';
 import { useCountdown } from '../hooks/useCountdown';
 import { RecurrenceSelector } from './RecurrenceSelector';
 import { ContentSearchBar, type SearchMatch } from './ContentSearchBar';
@@ -53,6 +54,7 @@ export function TaskEditorOverlay({ promptId, originCardId, onClose, promptIds, 
   const { theme } = useTheme();
   const { state, savePrompt, deletePrompt } = useApp();
   const { showToast } = useToast();
+  const { triggerAction } = useLumi();
 
   const [animationState, setAnimationState] = useState<AnimationState | null>(null);
   const [isClosing, setIsClosing] = useState(false);
@@ -110,32 +112,20 @@ export function TaskEditorOverlay({ promptId, originCardId, onClose, promptIds, 
   // 如果是重复任务，使用下一次触发时间；如果是一次性任务，使用 scheduledTime
   const currentTargetDate = useMemo(() => {
     if (recurrence?.enabled) {
-      // 重复任务：计算下一次触发时间
       return getNextTriggerTime(recurrence, prompt?.meta.last_notified ?? prompt?.meta.created_at);
-    } else if (scheduledTime) {
-      // 一次性任务：使用用户设置的时间
+    }
+    if (scheduledTime) {
       return new Date(scheduledTime).toISOString();
     }
     return new Date().toISOString();
   }, [recurrence?.enabled, recurrence?.type, recurrence?.intervalMinutes, recurrence?.time, scheduledTime, prompt?.meta.last_notified, prompt?.meta.created_at]);
 
-  // 🔥 稳定化 recurrence 对象，避免无限循环
-  const stableRecurrence = useMemo(() => {
-    if (recurrence?.type === 'interval' && recurrence.intervalMinutes) {
-      return {
-        type: 'interval' as const,
-        intervalMinutes: recurrence.intervalMinutes
-      };
-    }
-    return undefined;
-  }, [recurrence?.type, recurrence?.intervalMinutes]);
+  const progressStartDate = recurrence?.enabled
+    ? (prompt?.meta.last_notified ?? prompt?.meta.created_at)
+    : prompt?.meta.created_at;
 
   // 倒计时 - 使用当前编辑状态的时间，而不是原始数据
-  const countdown = useCountdown(
-    currentTargetDate,
-    prompt?.meta.created_at, // 传入创建时间作为开始时间
-    stableRecurrence
-  );
+  const countdown = useCountdown(currentTargetDate, progressStartDate);
 
   // 动画相关
   const durationOpenMs = 400;
@@ -404,6 +394,7 @@ export function TaskEditorOverlay({ promptId, originCardId, onClose, promptIds, 
             content,
           };
           await savePrompt(updated);
+          triggerAction('update');
           showToast("已保存更改", 'success');
         } catch (error) {
           showToast("保存失败", 'error');
@@ -451,14 +442,15 @@ export function TaskEditorOverlay({ promptId, originCardId, onClose, promptIds, 
         onClose();
       });
     }, durationCloseMs);
-  }, [isClosing, prompt, title, content, scheduledTime, recurrence, savePrompt, showToast, originCardId, animationState, onClose, durationCloseMs]);
+  }, [isClosing, prompt, title, content, scheduledTime, recurrence, savePrompt, showToast, originCardId, animationState, onClose, durationCloseMs, triggerAction]);
 
   const handleDelete = async () => {
     if (!prompt) return;
     
     if (window.confirm('确定要删除这个任务吗？')) {
       try {
-        await deletePrompt(prompt.meta.id, false);
+          await deletePrompt(prompt.meta.id, false);
+        triggerAction('delete');
         showToast("已移动到回收站", 'success');
         onClose();
       } catch (error) {

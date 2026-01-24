@@ -12,6 +12,17 @@ use std::os::windows::process::CommandExt;
 
 struct BackendProcess(Mutex<Option<CommandChild>>);
 
+struct CloseBehaviorState(Mutex<String>);
+
+// "minimize" => hide to tray
+// "exit" => exit app
+fn normalize_close_behavior(value: &str) -> String {
+    match value {
+        "exit" => "exit".to_string(),
+        _ => "minimize".to_string(),
+    }
+}
+
 fn terminate_backend(app: &tauri::AppHandle) {
     if let Some(state) = app.try_state::<BackendProcess>() {
         if let Ok(mut guard) = state.0.lock() {
@@ -74,6 +85,28 @@ fn exit_app(app: tauri::AppHandle) {
     println!("User requested exit from frontend");
     terminate_backend(&app);
     app.exit(0);
+}
+
+#[tauri::command]
+fn set_close_behavior(app: tauri::AppHandle, behavior: String) {
+    let normalized = normalize_close_behavior(&behavior);
+    if let Some(state) = app.try_state::<CloseBehaviorState>() {
+        if let Ok(mut guard) = state.0.lock() {
+            *guard = normalized;
+        }
+    } else {
+        app.manage(CloseBehaviorState(Mutex::new(normalized)));
+    }
+}
+
+#[tauri::command]
+fn get_close_behavior(app: tauri::AppHandle) -> String {
+    if let Some(state) = app.try_state::<CloseBehaviorState>() {
+        if let Ok(guard) = state.0.lock() {
+            return normalize_close_behavior(&guard);
+        }
+    }
+    "minimize".to_string()
 }
 
 // 🔥 启动后端服务器命令（用于延迟启动）
@@ -275,7 +308,7 @@ pub fn run() {
     }))
     // 🔥 通知插件：支持系统级任务提醒
     .plugin(tauri_plugin_notification::init())
-    .invoke_handler(tauri::generate_handler![exit_app, start_backend_if_needed])
+    .invoke_handler(tauri::generate_handler![exit_app, start_backend_if_needed, set_close_behavior, get_close_behavior])
     .setup(move |app| {
       // 🚀 优化：减少启动日志，加快启动速度
       #[cfg(desktop)]
@@ -297,6 +330,9 @@ pub fn run() {
         .executable_dir()
         .unwrap_or_else(|_| std::path::PathBuf::from("."))
         .join("vault");
+
+      // 默认关闭行为：最小化到托盘
+      app.manage(CloseBehaviorState(Mutex::new("minimize".to_string())));
 
       if let Err(err) = std::fs::create_dir_all(&vault_root) {
         eprintln!("Failed to create vault directory: {}", err);
@@ -410,9 +446,21 @@ pub fn run() {
       tauri::RunEvent::WindowEvent { label, event: win_event, .. } => {
         if label == "main" {
           if let tauri::WindowEvent::CloseRequested { api, .. } = win_event {
-            // 阻止默认关闭行为，隐藏窗口到托盘
-            // 注意：这只会在用户绕过自定义标题栏直接关闭窗口时触发
             api.prevent_close();
+
+            let behavior = if let Some(state) = app_handle.try_state::<CloseBehaviorState>() {
+              state.0.lock().ok().map(|g| normalize_close_behavior(&g)).unwrap_or_else(|| "minimize".to_string())
+            } else {
+              "minimize".to_string()
+            };
+
+            if behavior == "exit" {
+              println!("Close requested: exit");
+              terminate_backend(&app_handle);
+              app_handle.exit(0);
+              return;
+            }
+
             if let Some(window) = app_handle.get_webview_window("main") {
               let _ = window.hide();
             }

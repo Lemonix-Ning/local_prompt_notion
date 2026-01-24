@@ -24,6 +24,7 @@ import {
 import { getSmartIcon } from '../utils/smartIcon';
 import { getIconGradientConfig, getTagStyle } from '../utils/tagColors';
 import { useToast } from '../contexts/ToastContext';
+import { useLumi } from '../contexts/LumiContext';
 import { useConfirm } from '../contexts/ConfirmContext';
 import { ContentSearchBar, type SearchMatch } from './ContentSearchBar';
 import { lazy, Suspense } from 'react';
@@ -35,7 +36,7 @@ interface EditorOverlayProps {
   promptId: string;
   originCardId: string;
   onClose: () => void;
-  // 🔥 卡片导航支持
+  // 卡片导航支持
   promptIds?: string[]; // 当前视图的所有卡片 ID 列表
   onNavigate?: (promptId: string, originCardId: string) => void; // 导航到其他卡片
 }
@@ -435,35 +436,37 @@ export function EditorOverlay({ promptId, originCardId, onClose, promptIds, onNa
   const { theme } = useTheme();
   const { state, savePrompt, deletePrompt } = useApp();
   const { showToast } = useToast();
+  const { triggerAction } = useLumi();
+
   useConfirm(); // 保留 hook 调用以维持 Context 订阅
   const [animationState, setAnimationState] = useState<AnimationState | null>(null);
   const [isExpanded, setIsExpanded] = useState(false);
   const [isFocusMode, setIsFocusMode] = useState(false);
   const [isClosing, setIsClosing] = useState(false);
   
-  // 🔥 搜索功能状态
+  // 搜索功能状态
   const [isSearchVisible, setIsSearchVisible] = useState(false);
-  const [isEditing, setIsEditing] = useState(false); // 🔥 编辑模式：默认显示渲染后的 Markdown
+  const [isEditing, setIsEditing] = useState(false); // 编辑模式：默认显示渲染后的 Markdown
   const contentTextareaRef = useRef<HTMLTextAreaElement>(null);
   const markdownContainerRef = useRef<HTMLDivElement>(null);
   
-  // 🔥 双击检测：区分单击进入编辑 vs 双击进入专注模式
+  // 双击检测：区分单击进入编辑 vs 双击进入专注模式
   const clickTimerRef = useRef<number | null>(null);
   const clickCountRef = useRef<number>(0);
   
-  // 🔥 右键菜单状态
+  // 右键菜单状态
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
   const contextMenuRef = useRef<HTMLDivElement>(null);
 
   const scrollableRef = useRef<HTMLDivElement>(null);
   const scrollTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   
-  // 🔥 添加 firework 效果状态
+  // 添加 firework 效果状态
   const [isBursting, setIsBursting] = useState(false);
   const [burstAnchor, setBurstAnchor] = useState<{ x: number; y: number } | null>(null);
   const burstTimerRef = useRef<number | null>(null);
 
-  // 🔥 图片粘贴状态
+  // 图片粘贴状态
   const [isUploadingImage, setIsUploadingImage] = useState(false);
 
   /**
@@ -769,6 +772,7 @@ export function EditorOverlay({ promptId, originCardId, onClose, promptIds, onNa
           content,
         };
         await savePrompt(updated);
+        triggerAction('update');
         showToast("已保存更改", 'success');
       } catch (error) {
         showToast("保存失败", 'error');
@@ -806,7 +810,7 @@ export function EditorOverlay({ promptId, originCardId, onClose, promptIds, onNa
       setAnimationState(closeState);
     }
 
-    // 🔥 修复：在关闭动画完成后恢复原卡片显示并调用 onClose
+    // 修复：在关闭动画完成后恢复原卡片显示并调用 onClose
     // 使用 setTimeout 而不是 transitionend 事件，因为更可靠
     setTimeout(() => {
       if (originCard) {
@@ -860,7 +864,7 @@ export function EditorOverlay({ promptId, originCardId, onClose, promptIds, onNa
         return;
       }
       
-      // 🔥 左右箭头：切换卡片
+      // 左右箭头：切换卡片
       if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
         // 如果正在编辑文本，不拦截箭头键
         if (isEditing) return;
@@ -885,7 +889,7 @@ export function EditorOverlay({ promptId, originCardId, onClose, promptIds, onNa
         return;
       }
       
-      // 🔥 上下箭头：滚动内容
+      // 上下箭头：滚动内容
       if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
         // 如果正在编辑文本，不拦截箭头键
         if (isEditing) return;
@@ -903,7 +907,7 @@ export function EditorOverlay({ promptId, originCardId, onClose, promptIds, onNa
         return;
       }
       
-      // 🔥 空格键：循环切换 正常 → 扩大 → 专注 → 正常
+      // 空格键：循环切换 正常 → 扩大 → 专注 → 正常
       if (e.key === ' ') {
         e.preventDefault();
         
@@ -936,9 +940,9 @@ export function EditorOverlay({ promptId, originCardId, onClose, promptIds, onNa
 
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [isSearchVisible, handleClose, isExpanded, isFocusMode, isEditing, promptId, promptIds, onNavigate]); // 🔥 添加依赖项
+  }, [isSearchVisible, handleClose, isExpanded, isFocusMode, isEditing, promptId, promptIds, onNavigate]); 
   
-  // 🔥 右键菜单：点击外部关闭
+  // 右键菜单：点击外部关闭
   useEffect(() => {
     if (!contextMenu) return;
     
@@ -964,7 +968,7 @@ export function EditorOverlay({ promptId, originCardId, onClose, promptIds, onNa
     if (originCard) {
       const rect = originCard.getBoundingClientRect();
       
-      // 🔥 修复：在隐藏新卡片之前，先恢复所有之前被隐藏的卡片
+      // 修复：在隐藏新卡片之前，先恢复所有之前被隐藏的卡片
       // 这样可以确保在导航时，之前的卡片会被正确恢复显示
       const allCards = document.querySelectorAll('[id^="prompt-card-"]');
       allCards.forEach((card) => {
@@ -1093,7 +1097,7 @@ export function EditorOverlay({ promptId, originCardId, onClose, promptIds, onNa
   const handleToggleFavorite = async (e: React.MouseEvent) => {
     if (!prompt) return;
     
-    // 🔥 添加 firework 效果
+    // 添加 firework 效果
     if (!prompt.meta.is_favorite) {
       const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
       setIsBursting(true);
@@ -1118,7 +1122,8 @@ export function EditorOverlay({ promptId, originCardId, onClose, promptIds, onNa
     
     try {
       await savePrompt(updated);
-      // 移除 toast 提示
+      triggerAction('favorite');
+      showToast("已保存更改", 'success');
     } catch (error) {
       showToast("操作失败", 'error');
     }
@@ -1128,6 +1133,7 @@ export function EditorOverlay({ promptId, originCardId, onClose, promptIds, onNa
   const handleDelete = async () => {
     try {
       await deletePrompt(promptId, false);
+      triggerAction('delete');
       showToast("已移动到回收站，可从回收站恢复", 'success');
       onClose();
     } catch (error) {
@@ -1138,7 +1144,10 @@ export function EditorOverlay({ promptId, originCardId, onClose, promptIds, onNa
   // 处理复制
   const handleCopy = () => {
     navigator.clipboard.writeText(content)
-      .then(() => showToast("已复制到剪贴板", 'success'))
+      .then(() => {
+        showToast("已复制到剪贴板", 'success');
+        triggerAction('clipboard');
+      })
       .catch(() => showToast("复制失败", 'error'));
   };
 
@@ -1531,6 +1540,7 @@ export function EditorOverlay({ promptId, originCardId, onClose, promptIds, onNa
                             };
                             
                             await savePrompt(updated);
+                            triggerAction('update');
                             setCategory(newCategoryName || ''); // 更新本地状态
                             setTags(nextTags); // 标签栏同步更新
                             
@@ -1651,6 +1661,7 @@ export function EditorOverlay({ promptId, originCardId, onClose, promptIds, onNa
                               };
                               try {
                                 await savePrompt(updated);
+                                triggerAction('update');
                                 setTags(nextTags);
                               } catch (error) {
                                 showToast(`添加标签失败: ${(error as Error).message}`, 'error');

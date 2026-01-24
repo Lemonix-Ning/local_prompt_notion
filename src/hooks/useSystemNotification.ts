@@ -33,8 +33,8 @@ export function useSystemNotification() {
   const [permissionGranted, setPermissionGranted] = useState(false);
   const [isSupported, setIsSupported] = useState(false);
   
-  // Notification throttler to prevent spam (max 1 notification per 10s per task)
-  const throttlerRef = useRef<NotificationThrottler>(new NotificationThrottler({ throttleInterval: 10000 }));
+  // Notification throttler to prevent spam
+  const throttlerRef = useRef<NotificationThrottler>(new NotificationThrottler({ throttleInterval: 2000 }));
 
   // 初始化通知 API
   useEffect(() => {

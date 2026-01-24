@@ -89,8 +89,4 @@ DEVLOG.md
 # Documentation drafts (optional working documents)
 docs/tst.md
 
-# AI context and local docs (keep local, not for version control)
-.ai/
-docs/
-!.ai/context/
-!.ai/context/*
+

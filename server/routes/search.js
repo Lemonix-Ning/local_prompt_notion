@@ -42,14 +42,14 @@ router.get('/', async (req, res, next) => {
     }
 
     // 搜索
-    if (q) {
-      prompts = searchPrompts(prompts, q);
+    if (query) {
+      prompts = searchPrompts(prompts, query);
     }
 
     res.json({
       success: true,
       data: prompts,
-      query: { q, tags, category },
+      query: { q: query, tags, category },
     });
   } catch (error) {
     next(error);

@@ -12,6 +12,7 @@ import { useApp } from '../AppContext';
 import { ExportPromptsDialog } from './ExportPromptsDialog';
 import { useTheme } from '../contexts/ThemeContext';
 import { useToast } from '../contexts/ToastContext';
+import { useLumi } from '../contexts/LumiContext';
 import { ElasticScroll } from './ElasticScroll';
 import { saveRecentCategory } from '../utils/recentCategory';
 import { analyzeCategoryContent, CategoryContentInfo } from '../utils/categoryContentAnalyzer';
@@ -136,19 +137,29 @@ function ConfirmDialog({
 interface SettingsPanelProps {
   isOpen: boolean;
   onClose: () => void;
+  sidebarWidth: number;
 }
 
 function SettingsPanel({
   isOpen,
   onClose,
+  sidebarWidth,
 }: SettingsPanelProps) {
   const { showToast } = useToast();
+  const { themeMode, setThemeMode } = useTheme();
+  const [closeBehavior, setCloseBehavior] = useState<'minimize' | 'exit'>('minimize');
   const [autostartEnabled, setAutostartEnabled] = useState<boolean>(false);
   const [autostartLoading, setAutostartLoading] = useState<boolean>(false);
 
   useEffect(() => {
     if (!isOpen) return;
     let mounted = true;
+
+    const savedClosePreference = localStorage.getItem('closePreference');
+    if (savedClosePreference === 'exit' || savedClosePreference === 'minimize') {
+      setCloseBehavior(savedClosePreference);
+    }
+
     (async () => {
       try {
         const enabled = await isAutostartEnabled();
@@ -158,10 +169,39 @@ function SettingsPanel({
       }
     })();
 
+    (async () => {
+      try {
+        if (typeof window !== 'undefined' && window.location.port === '1420') {
+          const { invoke } = await import('@tauri-apps/api/core');
+          const behavior = await invoke<string>('get_close_behavior');
+          if (mounted && (behavior === 'exit' || behavior === 'minimize')) {
+            setCloseBehavior(behavior);
+          }
+        }
+      } catch {
+      }
+    })();
+
     return () => {
       mounted = false;
     };
   }, [isOpen]);
+
+  const handleToggleCloseBehavior = async () => {
+    if (!isOpen) return;
+    const next: 'minimize' | 'exit' = closeBehavior === 'minimize' ? 'exit' : 'minimize';
+    setCloseBehavior(next);
+    localStorage.setItem('closePreferenceVersion', '2');
+    localStorage.setItem('closePreference', next);
+
+    try {
+      if (typeof window !== 'undefined' && window.location.port === '1420') {
+        const { invoke } = await import('@tauri-apps/api/core');
+        await invoke('set_close_behavior', { behavior: next });
+      }
+    } catch {
+    }
+  };
 
   const handleToggleAutostart = async () => {
     if (!isOpen) return;
@@ -192,27 +232,38 @@ function SettingsPanel({
 
   return (
     <>
-      {/* 透明遮罩层 - 覆盖整个屏幕，点击任何外部区域关闭 */}
+      {/* 遮罩层 */}
       {isOpen && createPortal(
-        <div 
-          className="fixed inset-0 z-[50]" 
-          onClick={onClose}
-        />,
+        <>
+          {/* 仅侧边栏区域模糊（不拦截点击） */}
+          <div
+            className="fixed top-0 bottom-0 left-0 z-[50] bg-black/5 dark:bg-black/20 backdrop-blur-sm pointer-events-none"
+            style={{ width: `${sidebarWidth}px` }}
+          />
+
+          {/* 内容区点击关闭（不做模糊） */}
+          <div
+            className="fixed top-0 bottom-0 z-[50]"
+            style={{ left: `${sidebarWidth}px`, right: 0 }}
+            onClick={onClose}
+          />
+        </>,
         document.body
       )}
       
       {/* 抽屉本体 - 使用 Portal 渲染到 body，确保在遮罩层之上 */}
       {createPortal(
         <div
-          className={`fixed left-0 right-0 z-[60] bg-background/95 dark:bg-zinc-900/95 backdrop-blur-xl border-t border-border/50 shadow-[0_-10px_40px_rgba(0,0,0,0.3)] ${
+          className={`fixed z-[60] bg-background/95 dark:bg-zinc-900/95 backdrop-blur-xl border-t border-border/50 shadow-[0_-10px_40px_rgba(0,0,0,0.3)] ${
             isOpen ? 'translate-y-0 opacity-100 pointer-events-auto' : 'translate-y-[110%] opacity-0 pointer-events-none'
           }`}
           style={{
-            bottom: '120px', // 设置按钮区域高度约 120px，抽屉从其上方滑出
+            left: 0,
+            bottom: '72px',
             transformOrigin: 'bottom',
             transition: 'transform 0.4s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.3s ease',
-            maxHeight: 'calc(100vh - 200px)', // 留出顶部和底部空间
-            width: '256px', // 固定宽度，与侧边栏对齐
+            maxHeight: 'calc(100vh - 140px)',
+            width: `${sidebarWidth}px`,
           }}
           onClick={(e) => e.stopPropagation()} // 防止点击抽屉内部关闭
         >
@@ -221,6 +272,104 @@ function SettingsPanel({
         </div>
 
         <div className="p-3 space-y-3" style={{ maxHeight: 'calc(100vh - 280px)', overflowY: 'auto' }}>
+          {/* 主题 */}
+          <div className="space-y-2">
+            <div className="flex items-center gap-2 px-1">
+              <div className="w-1 h-3 bg-primary rounded-full" />
+              <h4 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">主题</h4>
+            </div>
+
+            <button
+              onClick={() => setThemeMode(themeMode === 'auto' ? 'manual' : 'auto')}
+              className={`w-full group relative overflow-hidden rounded-lg transition-all duration-200 ${
+                themeMode === 'auto'
+                  ? 'bg-primary/10 hover:bg-primary/15 border border-primary/30'
+                  : 'bg-accent/50 hover:bg-accent border border-border'
+              } cursor-pointer`}
+              title={themeMode === 'auto' ? '已开启：白天浅色，夜晚深色' : '开启自动切换：白天浅色，夜晚深色'}
+            >
+              <div className="flex items-center justify-between p-3">
+                <div className="flex items-center gap-3">
+                  <div className={`p-2 rounded-lg transition-colors ${
+                    themeMode === 'auto' ? 'bg-primary/20' : 'bg-muted'
+                  }`}
+                  >
+                    <Sun size={16} className={themeMode === 'auto' ? 'text-primary' : 'text-muted-foreground'} />
+                  </div>
+                  <div className="flex flex-col items-start">
+                    <span className="text-sm font-medium text-foreground">自动切换主题</span>
+                    <span className="text-xs text-muted-foreground">白天浅色，夜晚深色</span>
+                  </div>
+                </div>
+
+                {/* Toggle Switch */}
+                <div className={`relative w-11 h-6 rounded-full transition-colors duration-200 ${
+                  themeMode === 'auto' ? 'bg-primary' : 'bg-muted'
+                }`}
+                >
+                  <div className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow-sm transition-transform duration-200 ${
+                    themeMode === 'auto' ? 'translate-x-5' : 'translate-x-0'
+                  }`} />
+                </div>
+              </div>
+
+              {/* Shine effect on hover */}
+              <div className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none">
+                <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/5 to-transparent -translate-x-full group-hover:translate-x-full transition-transform duration-700" />
+              </div>
+            </button>
+          </div>
+
+          {/* 窗口关闭行为 */}
+          <div className="space-y-2">
+            <div className="flex items-center gap-2 px-1">
+              <div className="w-1 h-3 bg-primary rounded-full" />
+              <h4 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">窗口</h4>
+            </div>
+
+            <button
+              onClick={handleToggleCloseBehavior}
+              className={`w-full group relative overflow-hidden rounded-lg transition-all duration-200 ${
+                closeBehavior === 'minimize'
+                  ? 'bg-primary/10 hover:bg-primary/15 border border-primary/30'
+                  : 'bg-accent/50 hover:bg-accent border border-border'
+              } cursor-pointer`}
+              title={closeBehavior === 'minimize' ? '关闭窗口时最小化到托盘' : '关闭窗口时直接退出程序'}
+            >
+              <div className="flex items-center justify-between p-3">
+                <div className="flex items-center gap-3">
+                  <div className={`p-2 rounded-lg transition-colors ${
+                    closeBehavior === 'minimize' ? 'bg-primary/20' : 'bg-muted'
+                  }`}
+                  >
+                    <Settings size={16} className={closeBehavior === 'minimize' ? 'text-primary' : 'text-muted-foreground'} />
+                  </div>
+                  <div className="flex flex-col items-start">
+                    <span className="text-sm font-medium text-foreground">关闭窗口行为</span>
+                    <span className="text-xs text-muted-foreground">
+                      {closeBehavior === 'minimize' ? '最小化到托盘' : '直接退出程序'}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Toggle Switch */}
+                <div className={`relative w-11 h-6 rounded-full transition-colors duration-200 ${
+                  closeBehavior === 'minimize' ? 'bg-primary' : 'bg-muted'
+                }`}
+                >
+                  <div className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow-sm transition-transform duration-200 ${
+                    closeBehavior === 'minimize' ? 'translate-x-5' : 'translate-x-0'
+                  }`} />
+                </div>
+              </div>
+
+              {/* Shine effect on hover */}
+              <div className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none">
+                <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/5 to-transparent -translate-x-full group-hover:translate-x-full transition-transform duration-700" />
+              </div>
+            </button>
+          </div>
+
           {/* 启动配置 */}
           <div className="space-y-2">
             <div className="flex items-center gap-2 px-1">
@@ -377,6 +526,7 @@ export function Sidebar() {
   const { state, dispatch, createCategory, deleteCategory, renameCategory, moveCategory, refreshVault } = useApp();
   const { fileSystem, selectedCategory, uiState } = state;
   const { showToast } = useToast();
+  const { triggerAction } = useLumi();
   const [viewMode, setViewMode] = useState<'all' | 'favorites' | 'trash'>('all');
   const [isCreatingCategory, setIsCreatingCategory] = useState(false);
   const [newCategoryName, setNewCategoryName] = useState('');
@@ -582,6 +732,7 @@ export function Sidebar() {
 
     try {
       await createCategory(parentPath, newCategoryName.trim());
+      triggerAction('create_folder');
 
       if (newCategoryParent) {
         handlePinChain(newCategoryParent);
@@ -595,6 +746,11 @@ export function Sidebar() {
       showToast(`创建分类失败: ${(error as Error).message}`, 'error');
     }
   };
+
+  const handleRenameCategory = useCallback(async (path: string, newName: string) => {
+    await renameCategory(path, newName);
+    triggerAction('rename');
+  }, [renameCategory, triggerAction]);
 
   const handleCancelCreateCategory = () => {
     setIsCreatingCategory(false);
@@ -864,7 +1020,7 @@ export function Sidebar() {
                         dispatch({ type: 'SELECT_CATEGORY', payload: path });
                         saveRecentCategory(path); // 🚀 Performance: Save recent category
                       }}
-                      onRename={renameCategory}
+                      onRename={handleRenameCategory}
                       onDelete={handleDeleteWithConfirm}
                       onCreateSubCategory={handleStartCreateCategory}
                       onNewPrompt={handleNewPromptFromCategory}
@@ -926,6 +1082,7 @@ export function Sidebar() {
         <SettingsPanel
           isOpen={settingsOpen}
           onClose={() => setSettingsOpen(false)}
+          sidebarWidth={sidebarWidth}
         />
 
         {/* Resize Handle */}

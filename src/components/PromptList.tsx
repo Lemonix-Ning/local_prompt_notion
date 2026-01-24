@@ -37,12 +37,12 @@ import { getSmartIcon } from '../utils/smartIcon';
 import { getIconGradientConfig, getTagStyle } from '../utils/tagColors';
 import { useToast } from '../contexts/ToastContext';
 import { useConfirm } from '../contexts/ConfirmContext';
+import { useLumi } from '../contexts/LumiContext';
 import { Button } from './Button';
 import { NewPromptOverlay } from './NewPromptOverlay';
 import { ElasticScroll } from './ElasticScroll';
 import { EmptyState } from './EmptyState';
 import { DisintegrateOverlay } from './DisintegrateOverlay';
-import { ChronoAlert } from './ChronoAlert';
 import { ChronoCard } from './ChronoCard';
 import { RecurrenceSelector } from './RecurrenceSelector';
 import { ImportPromptsDialog } from './ImportPromptsDialog';
@@ -152,6 +152,7 @@ export function PromptList() {
   const { searchQuery, selectedCategory, uiState } = state;
   const { showToast } = useToast();
   const { confirm } = useConfirm();
+  const { notifyMessage, triggerAction, triggerTime, reportScrollSpeed, notifyAlert, clearAlert } = useLumi();
   const newPromptDraftKey = 'newPromptDraft';
   const [isSwitchingList, setIsSwitchingList] = useState(false);
   const [isCategoryOpen, setIsCategoryOpen] = useState(false);
@@ -194,21 +195,39 @@ export function PromptList() {
   
   // ========== Chrono Alert (时空警报) - V2 极简版 ==========
   const [alertTask, setAlertTask] = useState<PromptData | null>(null);
+  const lastAlertIdRef = useRef<string | null>(null);
   // @ts-ignore - Used in handleAlertDismiss for one-time tasks
   const [dismissedAlerts, setDismissedAlerts] = useState<Set<string>>(new Set());
+  const recurringNotifiedRef = useRef<Map<string, string>>(new Map());
   
   // 🔥 防止重复系统通知：记录已发送通知的任务 ID
   const sentSystemNotificationsRef = useRef<Set<string>>(new Set());
+  const lastBubbleAlertRef = useRef<string | null>(null);
   
   // 🔥 存储 handleAlertDismiss 的最新引用，用于自动关闭定时器
   const handleAlertDismissRef = useRef<(() => Promise<void>) | null>(null);
   
   // 🔥 V2: 使用后端调度器，前端只负责轮询和显示
-  const apiBaseUrl = typeof window !== 'undefined' && window.location.port === '1420' 
+  const isTauriEnv = typeof window !== 'undefined' && (
+    (window as any).__TAURI_INTERNALS__ ||
+    (window as any).__TAURI__ ||
+    window.location.protocol === 'tauri:' ||
+    (window.location.protocol === 'https:' && window.location.hostname === 'tauri.localhost')
+  );
+  const apiBaseUrl = isTauriEnv
     ? 'http://localhost:3002'  // Tauri 桌面端
     : 'http://localhost:3001'; // Web 端
   
-  const { pendingTasks, acknowledgeTask } = useIntervalTasks(apiBaseUrl, true);
+  const { pendingTasks, acknowledgeTask, refresh: refreshPendingTasks } = useIntervalTasks(apiBaseUrl, true);
+
+  useEffect(() => {
+    if (!alertTask) {
+      lastAlertIdRef.current = null;
+      return;
+    }
+    if (alertTask.meta.id === lastAlertIdRef.current) return;
+    lastAlertIdRef.current = alertTask.meta.id;
+  }, [alertTask]);
   
   // ========== System Notification (系统通知) ==========
   const {
@@ -237,10 +256,84 @@ export function PromptList() {
 
   // ========== 辅助函数：生成带重复标识的标题 ==========
   const getTaskTitleWithRepeatIndicator = (prompt: PromptData): string => {
-    // 🔥 修复：移除所有任务的重复次数标识
-    // 用户反馈：所有任务（一次性、interval、daily、weekly、monthly）都不需要显示 X1、X2 等后缀
-    // 直接返回原始标题
-    return prompt.meta.title;
+    const total = titleRepeatCountsRef.current.get(prompt.meta.title) || 0;
+    if (total <= 1) return prompt.meta.title;
+    const index = titleRepeatIndexRef.current.get(prompt.meta.id) || 1;
+    return `${prompt.meta.title} X${index}`;
+  };
+
+  const getRecurringCycleStart = (recurrence: RecurrenceConfig) => {
+    const now = new Date();
+    const [hours, minutes] = recurrence.time.split(':').map(Number);
+    const todayTrigger = new Date(now.getFullYear(), now.getMonth(), now.getDate(), hours, minutes, 0, 0);
+
+    if (recurrence.type === 'daily') {
+      if (now < todayTrigger) {
+        const yesterday = new Date(todayTrigger);
+        yesterday.setDate(yesterday.getDate() - 1);
+        return yesterday.toISOString();
+      }
+      return todayTrigger.toISOString();
+    }
+
+    if (recurrence.type === 'weekly') {
+      const weekDays = (recurrence.weekDays && recurrence.weekDays.length > 0)
+        ? recurrence.weekDays
+        : [0, 1, 2, 3, 4, 5, 6];
+      const sortedWeekDays = [...weekDays].sort((a, b) => a - b);
+      const todayDay = now.getDay();
+
+      if (sortedWeekDays.includes(todayDay) && now >= todayTrigger) {
+        return todayTrigger.toISOString();
+      }
+
+      for (let i = 1; i <= 7; i++) {
+        const checkDate = new Date(now.getFullYear(), now.getMonth(), now.getDate() - i, hours, minutes, 0, 0);
+        if (sortedWeekDays.includes(checkDate.getDay())) {
+          return checkDate.toISOString();
+        }
+      }
+
+      return todayTrigger.toISOString();
+    }
+
+    if (recurrence.type === 'monthly') {
+      const monthDays = (recurrence.monthDays && recurrence.monthDays.length > 0)
+        ? recurrence.monthDays
+        : Array.from({ length: 31 }, (_, i) => i + 1);
+      const sortedMonthDays = [...monthDays].sort((a, b) => a - b);
+      const todayDate = now.getDate();
+
+      if (sortedMonthDays.includes(todayDate) && now >= todayTrigger) {
+        return todayTrigger.toISOString();
+      }
+
+      for (let i = sortedMonthDays.length - 1; i >= 0; i--) {
+        const day = sortedMonthDays[i];
+        if (day < todayDate) {
+          const checkDate = new Date(now.getFullYear(), now.getMonth(), day, hours, minutes, 0, 0);
+          if (checkDate.getDate() === day) {
+            return checkDate.toISOString();
+          }
+        }
+      }
+
+      const prevMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1, hours, minutes, 0, 0);
+      const prevMonthYear = prevMonth.getFullYear();
+      const prevMonthIndex = prevMonth.getMonth();
+
+      for (let i = sortedMonthDays.length - 1; i >= 0; i--) {
+        const day = sortedMonthDays[i];
+        const checkDate = new Date(prevMonthYear, prevMonthIndex, day, hours, minutes, 0, 0);
+        if (checkDate.getDate() === day) {
+          return checkDate.toISOString();
+        }
+      }
+
+      return todayTrigger.toISOString();
+    }
+
+    return todayTrigger.toISOString();
   };
 
   const fireworkParticles = useMemo(() => {
@@ -259,6 +352,24 @@ export function PromptList() {
 
   // ========== 获取过滤后的提示词列表 (必须在 useEffect 之前) ==========
   const allPrompts = getFilteredPrompts();
+  const titleRepeatCountsRef = useRef<Map<string, number>>(new Map());
+  const titleRepeatIndexRef = useRef<Map<string, number>>(new Map());
+
+  useMemo(() => {
+    const counts = new Map<string, number>();
+    const indices = new Map<string, number>();
+
+    allPrompts.forEach(prompt => {
+      const title = prompt.meta.title;
+      const next = (counts.get(title) || 0) + 1;
+      counts.set(title, next);
+      indices.set(prompt.meta.id, next);
+    });
+
+    titleRepeatCountsRef.current = counts;
+    titleRepeatIndexRef.current = indices;
+    return null;
+  }, [allPrompts]);
   
   // 🔥 调试：检查数据是否加载
   useEffect(() => {
@@ -279,6 +390,7 @@ export function PromptList() {
   const CARD_HEIGHT = 272; // 64 (h-64) * 4 (1rem = 4px) + gap
   const [containerHeight, setContainerHeight] = useState(800);
   const elasticScrollRef = useRef<HTMLDivElement>(null);
+  const lastScrollRef = useRef<{ y: number; t: number }>({ y: 0, t: Date.now() });
   
   // Enable virtual scrolling only when there are >50 cards
   const enableVirtualScroll = allPrompts.length > VIRTUAL_SCROLL_THRESHOLD;
@@ -299,17 +411,26 @@ export function PromptList() {
   
   // Attach scroll listener to ElasticScroll's inner div
   useEffect(() => {
-    if (!enableVirtualScroll || !elasticScrollRef.current) return;
+    if (!elasticScrollRef.current) return;
     
     // Find the scrollable div inside ElasticScroll
     const scrollableDiv = elasticScrollRef.current.querySelector('div[style*="overflowY"]') as HTMLDivElement;
     if (!scrollableDiv) return;
     
     const handleScroll = (e: Event) => {
+      const target = e.currentTarget as HTMLDivElement;
+      const now = Date.now();
+      const deltaY = Math.abs(target.scrollTop - lastScrollRef.current.y);
+      const deltaT = now - lastScrollRef.current.t;
+      const speed = deltaT > 0 ? deltaY / deltaT : 0;
+      lastScrollRef.current = { y: target.scrollTop, t: now };
+      reportScrollSpeed(speed);
       const syntheticEvent = {
         currentTarget: e.currentTarget,
       } as React.UIEvent<HTMLDivElement>;
-      onScroll(syntheticEvent);
+      if (enableVirtualScroll) {
+        onScroll(syntheticEvent);
+      }
     };
     
     scrollableDiv.addEventListener('scroll', handleScroll);
@@ -325,7 +446,7 @@ export function PromptList() {
       scrollableDiv.removeEventListener('scroll', handleScroll);
       window.removeEventListener('resize', updateHeight);
     };
-  }, [enableVirtualScroll, onScroll]);
+  }, [enableVirtualScroll, onScroll, reportScrollSpeed]);
 
   const { isHidden } = useDocumentVisibility();
 
@@ -335,6 +456,7 @@ export function PromptList() {
   const dismissedAlertsRef = useRef<Set<string>>(new Set());
   const notifiedTasksRef = useRef<Set<string>>(new Set());
   const alertTaskRef = useRef<PromptData | null>(null);
+  const autoTrashedOneTimeRef = useRef<Set<string>>(new Set());
   const sessionStartedAtRef = useRef<number>(Date.now());
   const firstScanRef = useRef<boolean>(true);
   
@@ -965,9 +1087,10 @@ export function PromptList() {
       }
       
     } else if (pendingTasks.length === 0 && alertTask) {
-      // 所有任务都已处理，清除警报
+      // 所有 interval 任务都已处理，清除 interval 警报；一次性/日常任务保留以便提示/自动回收
+      const isIntervalAlert = alertTask.meta.recurrence?.type === 'interval';
       const isStillPending = pendingTasks.some(t => t.meta.id === alertTask.meta.id);
-      if (!isStillPending) {
+      if (isIntervalAlert && !isStillPending) {
         setAlertTask(null);
         // 清除已发送通知的记录
         sentSystemNotificationsRef.current.delete(alertTask.meta.id);
@@ -978,6 +1101,9 @@ export function PromptList() {
   // ========== V2: 系统通知 + 自动关闭定时器（独立 effect）==========
   useEffect(() => {
     if (!alertTask) return;
+
+    const STARTUP_SUPPRESS_DURATION_MS = 5000;
+    if (Date.now() - sessionStartedAtRef.current < STARTUP_SUPPRESS_DURATION_MS) return;
     
     const taskId = alertTask.meta.id;
     
@@ -1018,19 +1144,31 @@ export function PromptList() {
     };
   }, [alertTask]);
 
+  useEffect(() => {
+    if (!alertTask) return;
+    if (lastBubbleAlertRef.current === alertTask.meta.id) return;
+    lastBubbleAlertRef.current = alertTask.meta.id;
+    const title = alertTask.meta.recurrence?.enabled ? '⏰ 任务已到期' : '⏰ 任务即将到期';
+    const durationMs = alertTask.meta.recurrence?.enabled ? 3000 : 2000;
+    notifyMessage(`${title} · ${alertTask.meta.title}`, durationMs);
+    if (alertTask.meta.recurrence?.enabled) {
+      triggerTime('countdown', 3000);
+    } else {
+      triggerTime('schedule', 2000);
+    }
+  }, [alertTask, notifyMessage, triggerTime]);
+
   // ========== Focus Mode 处理函数 ==========
-  const enterFocusMode = (promptId: string) => {
+  const enterFocusMode = useCallback((promptId: string) => {
     setFocusedCardId(promptId);
     setFocusModeActive(true);
-    
-    // 滚动到目标卡片
     setTimeout(() => {
       const element = document.getElementById(`card-${promptId}`);
       if (element) {
         element.scrollIntoView({ behavior: 'smooth', block: 'center' });
       }
     }, 100);
-  };
+  }, []);
   
   const exitFocusMode = () => {
     setFocusModeActive(false);
@@ -1038,19 +1176,17 @@ export function PromptList() {
   };
   
   // ========== Chrono Alert 处理函数 ==========
-  const handleAlertFocus = () => {
+  const handleAlertFocus = useCallback(() => {
     if (alertTask) {
-      // 🔥 先切换到"全部"视图，确保任务卡片可见
       dispatch({ type: 'SELECT_CATEGORY', payload: null });
       
-      // 等待视图切换完成后再进入 Focus Mode
       setTimeout(() => {
         enterFocusMode(alertTask.meta.id);
       }, 150);
       
       setAlertTask(null);
     }
-  };
+  }, [alertTask, dispatch, enterFocusMode]);
   
   const handleAlertDismiss = useCallback(async () => {
     if (!alertTask) return;
@@ -1065,14 +1201,15 @@ export function PromptList() {
       // 🔥 先关闭通知栏，防止重复触发系统通知
       setAlertTask(null);
 
-      // 重复任务：调用后端 acknowledge API
-      if (isRecurringTask && alertTask.meta.recurrence?.type === 'interval') {
-        const result = await acknowledgeTask(taskId);
-        
-        if (!result.success) {
-          showToast('确认失败，请重试', 'error');
+      // 重复任务：interval 走后端 acknowledge；其他重复任务不移入回收站
+      if (isRecurringTask) {
+        if (alertTask.meta.recurrence?.type === 'interval') {
+          const result = await acknowledgeTask(taskId);
+          if (!result.success) {
+            showToast('确认失败，请重试', 'error');
+          }
         }
-        
+        sentSystemNotificationsRef.current.delete(taskId);
         return;
       }
 
@@ -1113,6 +1250,122 @@ export function PromptList() {
   useEffect(() => {
     handleAlertDismissRef.current = handleAlertDismiss;
   }, [handleAlertDismiss]);
+
+  useEffect(() => {
+    if (!alertTask) {
+      clearAlert();
+      return;
+    }
+    notifyAlert({
+      id: alertTask.meta.id,
+      title: alertTask.meta.title,
+      onFocus: handleAlertFocus,
+      onDismiss: handleAlertDismiss,
+      durationMs: 5000,
+    });
+  }, [alertTask, clearAlert, handleAlertDismiss, handleAlertFocus, notifyAlert]);
+
+  // ========== One-time Task Auto Trash ==========
+  useEffect(() => {
+    const handleDueOneTimeTasks = () => {
+      if (pendingTasks.length > 0 || alertTask) return;
+
+      const allPrompts = Array.from(state.fileSystem?.allPrompts.values() || []);
+      const now = Date.now();
+
+      const dueOneTimeTasks = allPrompts.filter(prompt => {
+        if (prompt.meta.type !== 'TASK') return false;
+        if (!prompt.meta.scheduled_time) return false;
+        if (prompt.meta.recurrence?.enabled) return false;
+        if (prompt.path?.includes('/trash/') || prompt.path?.includes('\\trash\\')) return false;
+
+        const scheduledMs = new Date(prompt.meta.scheduled_time).getTime();
+        if (!Number.isFinite(scheduledMs) || scheduledMs > now) return false;
+        return !autoTrashedOneTimeRef.current.has(prompt.meta.id);
+      });
+
+      if (dueOneTimeTasks.length === 0) return;
+
+      const nextTask = dueOneTimeTasks[0];
+      autoTrashedOneTimeRef.current.add(nextTask.meta.id);
+      setAlertTask(nextTask);
+    };
+
+    handleDueOneTimeTasks();
+    const interval = window.setInterval(handleDueOneTimeTasks, 5000);
+    return () => window.clearInterval(interval);
+  }, [state.fileSystem?.allPrompts, pendingTasks.length, alertTask]);
+
+  // ========== Daily/Weekly/Monthly Recurring Task Notifications ==========
+  useEffect(() => {
+    const handleDueRecurringTasks = () => {
+      const STARTUP_SUPPRESS_DURATION_MS = 5000;
+      if (Date.now() - sessionStartedAtRef.current < STARTUP_SUPPRESS_DURATION_MS) return;
+      if (alertTask) return;
+
+      const allPrompts = Array.from(state.fileSystem?.allPrompts.values() || []);
+      const now = Date.now();
+
+      const dueRecurringTasks = allPrompts.filter(prompt => {
+        if (prompt.meta.type !== 'TASK') return false;
+        if (!prompt.meta.recurrence?.enabled) return false;
+        if (!['daily', 'weekly', 'monthly'].includes(prompt.meta.recurrence.type)) return false;
+        if (prompt.path?.includes('/trash/') || prompt.path?.includes('\\trash\\')) return false;
+
+        const recurrence = prompt.meta.recurrence;
+        const [hours, minutes] = recurrence.time.split(':').map(Number);
+        const triggerDate = new Date();
+        triggerDate.setHours(hours, minutes, 0, 0);
+
+        if (recurrence.type === 'weekly') {
+          const weekDays = (recurrence.weekDays && recurrence.weekDays.length > 0)
+            ? recurrence.weekDays
+            : [0, 1, 2, 3, 4, 5, 6];
+          if (!weekDays.includes(triggerDate.getDay())) return false;
+        }
+
+        if (recurrence.type === 'monthly') {
+          const monthDays = (recurrence.monthDays && recurrence.monthDays.length > 0)
+            ? recurrence.monthDays
+            : Array.from({ length: 31 }, (_, i) => i + 1);
+          if (!monthDays.includes(triggerDate.getDate())) return false;
+        }
+
+        const triggerMs = triggerDate.getTime();
+        if (now < triggerMs) return false;
+
+        const triggerKey = triggerDate.toISOString().slice(0, 10);
+        if (recurringNotifiedRef.current.get(prompt.meta.id) === triggerKey) return false;
+
+        if (prompt.meta.last_notified) {
+          const lastNotified = new Date(prompt.meta.last_notified).getTime();
+          if (lastNotified >= triggerMs) return false;
+        }
+
+        return true;
+      });
+
+      if (dueRecurringTasks.length === 0) return;
+
+      const nextTask = dueRecurringTasks[0];
+      const triggerKey = new Date().toISOString().slice(0, 10);
+      recurringNotifiedRef.current.set(nextTask.meta.id, triggerKey);
+      setAlertTask(nextTask);
+      const nowIso = new Date().toISOString();
+      const updated = {
+        ...nextTask,
+        meta: {
+          ...nextTask.meta,
+          last_notified: nowIso,
+        },
+      };
+      savePrompt(updated).catch(() => null);
+    };
+
+    handleDueRecurringTasks();
+    const interval = window.setInterval(handleDueRecurringTasks, 5000);
+    return () => window.clearInterval(interval);
+  }, [state.fileSystem?.allPrompts, alertTask, savePrompt]);
   
   // ========== ESC 键退出 Focus Mode ==========
   useEffect(() => {
@@ -1949,7 +2202,10 @@ export function PromptList() {
 
   const handleCopy = (text: string) => {
     navigator.clipboard.writeText(text)
-      .then(() => showToast("已复制到剪贴板", 'success'))
+      .then(() => {
+        showToast("已复制到剪贴板", 'success');
+        triggerAction('clipboard');
+      })
       .catch(() => showToast("复制失败", 'error'));
   };
 
@@ -1970,7 +2226,7 @@ export function PromptList() {
     
     try {
       await savePrompt(updated);
-      // 移除 toast 提示
+      triggerAction('favorite');
     } catch (error) {
       showToast("更新失败", 'error');
     }
@@ -1990,6 +2246,7 @@ export function PromptList() {
     
     try {
       await savePrompt(updated);
+      triggerAction('pin');
       // 强制刷新以确保 UI 更新
       await refreshVault();
     } catch (error) {
@@ -2041,6 +2298,7 @@ export function PromptList() {
       });
       
       if (confirmed) {
+        triggerAction('delete');
         setDeletingIds(prev => {
           const next = new Set(prev);
           next.add(promptId);
@@ -2062,6 +2320,7 @@ export function PromptList() {
         }, 600);
       }
     } else {
+      triggerAction('delete');
       // 不在回收站,直接移动到回收站（带动画 + 队列合并 toast）
       setDeletingIds(prev => {
         const next = new Set(prev);
@@ -2109,6 +2368,7 @@ export function PromptList() {
   const handleRestore = async (promptId: string) => {
     try {
       await restorePrompt(promptId);
+      triggerAction('restore');
       showToast("已恢复", 'success');
     } catch (error) {
       console.error('[Restore] Failed to restore prompt:', error);
@@ -2527,6 +2787,7 @@ export function PromptList() {
           ? new Date(newPrompt.scheduledTime).toISOString() 
           : undefined,
       });
+
       
       const updated = {
         ...created,
@@ -2540,6 +2801,7 @@ export function PromptList() {
         }
       };
       await savePrompt(updated);
+      triggerAction('create_card');
 
       setNewPrompt({ title: '', content: '', category: '', tags: '', type: 'NOTE', scheduledTime: '', recurrence: undefined });
       clearNewPromptDraft();
@@ -2558,15 +2820,6 @@ export function PromptList() {
 
   return (
     <div className="flex-1 flex flex-col h-full overflow-hidden relative bg-transparent">
-      {/* Chrono Alert */}
-      {alertTask && (
-        <ChronoAlert
-          task={alertTask}
-          onFocus={handleAlertFocus}
-          onDismiss={handleAlertDismiss}
-        />
-      )}
-      
       {/* Top Navigation Bar */}
       <div 
         className="h-16 flex items-center justify-between px-6 border-b border-border flex-shrink-0 bg-background/50 backdrop-blur-md z-10 sticky top-0"
@@ -2607,8 +2860,13 @@ export function PromptList() {
               type="text"
               placeholder="搜索提示词..."
               value={searchQuery}
-              onChange={(e) => dispatch({ type: 'SET_SEARCH', payload: e.target.value })}
-              onFocus={() => setIsSearchFocused(true)}
+              onChange={(e) => {
+                dispatch({ type: 'SET_SEARCH', payload: e.target.value });
+              }}
+              onFocus={() => {
+                setIsSearchFocused(true);
+                triggerAction('search');
+              }}
               onBlur={() => setIsSearchFocused(false)}
               data-tauri-drag-region={false}
               className="flex-1 px-3 py-2 bg-transparent outline-none text-sm text-foreground placeholder:text-muted-foreground"
@@ -3117,13 +3375,20 @@ export function PromptList() {
                           startDate={
                             prompt.meta.recurrence.type === 'interval'
                               ? (prompt.meta.last_notified ?? prompt.meta.created_at)
+                              : ['daily', 'weekly', 'monthly'].includes(prompt.meta.recurrence.type)
+                              ? getRecurringCycleStart(prompt.meta.recurrence)
                               : prompt.meta.created_at
                           }
                           invertProgress={prompt.meta.recurrence.type === 'interval'}
-                          recurrence={prompt.meta.recurrence.type === 'interval' && prompt.meta.recurrence.intervalMinutes ? {
-                            type: 'interval',
-                            intervalMinutes: prompt.meta.recurrence.intervalMinutes
-                          } : undefined}
+                          onExpire={async () => {
+                            if (!prompt.meta.recurrence?.enabled || prompt.meta.recurrence.type !== 'interval') return;
+                            try {
+                              await fetch(`${apiBaseUrl}/api/interval-tasks/${prompt.meta.id}/notify`, { method: 'POST' });
+                              await refreshPendingTasks();
+                            } catch (error) {
+                              console.error('[Countdown] Failed to notify interval task:', error);
+                            }
+                          }}
                         />
                       </div>
                     ) : prompt.meta.scheduled_time && !isInTrash ? (
@@ -3370,7 +3635,9 @@ export function PromptList() {
                             type="datetime-local"
                             className="flex-1 bg-transparent border-none outline-none text-foreground pointer-events-none"
                             value={newPrompt.scheduledTime}
-                            onChange={(e) => setNewPrompt({...newPrompt, scheduledTime: e.target.value})}
+                            onChange={(e) => {
+                              setNewPrompt({ ...newPrompt, scheduledTime: e.target.value });
+                            }}
                             tabIndex={-1}
                           />
                         </div>
