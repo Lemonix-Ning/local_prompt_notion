@@ -27,10 +27,12 @@ pub async fn set_window_visibility(
     Ok(())
 }
 
+#[allow(dead_code)]
 fn get_pending_tasks_internal(state: &SchedulerState) -> Vec<TaskPayload> {
     get_pending_notifications(&state.pending_notifications)
 }
 
+#[allow(dead_code)]
 async fn acknowledge_task_internal(state: &SchedulerState, task_id: &str) -> Result<(), String> {
     acknowledge_pending_task(&state.pending_notifications, task_id, &state.vault_path)
         .await

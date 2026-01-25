@@ -13,7 +13,7 @@ export type LumiAction =
   | 'rename';
 
 export type LumiTransferState = 'importing' | 'exporting' | null;
-export type LumiTimeState = 'countdown' | 'schedule' | null;
+export type LumiTimeState = 'alarm' | 'schedule' | null;
 export type LumiAlert = { id: string; title: string } | null;
 
 interface LumiContextValue {
@@ -45,7 +45,7 @@ const TRANSFER_DURATION_MS = 2000;
 const COUNTDOWN_DURATION_MS = 3000;
 const SCHEDULE_DURATION_MS = 2000;
 const WIND_DURATION_MS = 200;
-const SLEEP_DURATION_MS = 5 * 60 * 1000;
+const SLEEP_DURATION_MS = 30 * 1000;
 
 export function LumiProvider({ children }: { children: ReactNode }) {
   const [action, setAction] = useState<LumiAction | null>(null);
@@ -111,7 +111,7 @@ export function LumiProvider({ children }: { children: ReactNode }) {
     notifyActivity();
     setTimeState(state);
     clearTimer(timeTimerRef);
-    const duration = durationMs ?? (state === 'countdown' ? COUNTDOWN_DURATION_MS : SCHEDULE_DURATION_MS);
+    const duration = durationMs ?? (state === 'alarm' ? COUNTDOWN_DURATION_MS : SCHEDULE_DURATION_MS);
     timeTimerRef.current = window.setTimeout(() => {
       setTimeState(null);
     }, duration);

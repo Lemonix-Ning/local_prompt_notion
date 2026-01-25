@@ -7,8 +7,6 @@ pub mod commands;
 pub mod file_ops;
 
 pub use scheduler::{
-    derive_scheduler_mode,
-    reset_interval_baselines,
     start_scheduler,
     stop_scheduler,
     CachedTask,

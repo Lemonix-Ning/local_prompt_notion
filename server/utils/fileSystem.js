@@ -182,6 +182,46 @@ async function loadPromptsInDirectory(dirPath, batchSize = 50) {
   return prompts;
 }
 
+async function loadPromptsRecursivelyInDirectory(dirPath, batchSize = 50) {
+  const prompts = [];
+
+  async function walk(currentPath) {
+    let entries;
+    try {
+      entries = await fs.readdir(currentPath, { withFileTypes: true });
+    } catch {
+      return;
+    }
+
+    let processedCount = 0;
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue;
+
+      const fullPath = path.join(currentPath, entry.name);
+      const hasMeta = await exists(path.join(fullPath, 'meta.json'));
+
+      if (hasMeta) {
+        try {
+          const prompt = await readPrompt(fullPath);
+          prompts.push(prompt);
+        } catch {
+          // ignore
+        }
+      } else {
+        await walk(fullPath);
+      }
+
+      processedCount++;
+      if (processedCount % batchSize === 0) {
+        await new Promise(resolve => setImmediate(resolve));
+      }
+    }
+  }
+
+  await walk(dirPath);
+  return prompts;
+}
+
 /**
  * 读取单个提示词
  */
@@ -944,7 +984,7 @@ async function findPromptPathById(categories, promptId, vaultRoot) {
   try {
     const trashPath = path.join(vaultRoot, 'trash');
     if (await exists(trashPath)) {
-      const trashPrompts = await loadPromptsInDirectory(trashPath);
+      const trashPrompts = await loadPromptsRecursivelyInDirectory(trashPath);
       for (const prompt of trashPrompts) {
         if (prompt.meta.id === promptId) {
           return prompt.path;
@@ -1007,6 +1047,7 @@ module.exports = {
   isPathSafe,
   scanDirectory,
   loadPromptsInDirectory,
+  loadPromptsRecursivelyInDirectory,
   readPrompt,
   writePrompt,
   createPrompt,

@@ -156,10 +156,6 @@ export function getNextTriggerTime(config: RecurrenceConfig, baselineStr?: strin
   if (!config.enabled) return '';
   
   const now = new Date();
-  const [hours, minutes] = config.time.split(':').map(Number);
-  
-  // 创建今天的触发时间
-  const todayTrigger = new Date(now.getFullYear(), now.getMonth(), now.getDate(), hours, minutes, 0, 0);
   
   switch (config.type) {
     case 'interval': {
@@ -181,6 +177,9 @@ export function getNextTriggerTime(config: RecurrenceConfig, baselineStr?: strin
     }
 
     case 'daily': {
+      const safeTime = config.time || '00:00';
+      const [hours, minutes] = safeTime.split(':').map(Number);
+      const todayTrigger = new Date(now.getFullYear(), now.getMonth(), now.getDate(), hours, minutes, 0, 0);
       // 每天触发：如果今天的时间还没到，返回今天；否则返回明天
       if (todayTrigger > now) {
         return todayTrigger.toISOString();
@@ -191,6 +190,9 @@ export function getNextTriggerTime(config: RecurrenceConfig, baselineStr?: strin
     }
     
     case 'weekly': {
+      const safeTime = config.time || '00:00';
+      const [hours, minutes] = safeTime.split(':').map(Number);
+      const todayTrigger = new Date(now.getFullYear(), now.getMonth(), now.getDate(), hours, minutes, 0, 0);
       // 每周特定日触发
       if (!config.weekDays || config.weekDays.length === 0) {
         // 没有设置星期几，默认每天
@@ -224,6 +226,9 @@ export function getNextTriggerTime(config: RecurrenceConfig, baselineStr?: strin
     }
     
     case 'monthly': {
+      const safeTime = config.time || '00:00';
+      const [hours, minutes] = safeTime.split(':').map(Number);
+      const todayTrigger = new Date(now.getFullYear(), now.getMonth(), now.getDate(), hours, minutes, 0, 0);
       // 每月特定日触发
       if (!config.monthDays || config.monthDays.length === 0) {
         // 没有设置日期，默认每天
@@ -272,6 +277,6 @@ export function getNextTriggerTime(config: RecurrenceConfig, baselineStr?: strin
     }
     
     default:
-      return todayTrigger.toISOString();
+      return now.toISOString();
   }
 }

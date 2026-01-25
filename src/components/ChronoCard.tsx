@@ -8,11 +8,12 @@
  * - Scanline: CRT 风格的扫描线动画，增加科技感
  */
 
-import { memo, useEffect, useRef } from 'react';
+import { memo } from 'react';
 import { Clock, AlertCircle, Zap } from 'lucide-react';
-import { useCountdown } from '../hooks/useCountdown';
+import { useCountdownManager } from '../hooks/useCountdownManager';
 
 interface ChronoCardProps {
+  taskId: string; // 新增：任务 ID，用于 CountdownManager 识别
   targetDate: string;
   startDate?: string;
   isUrgent?: boolean;
@@ -21,23 +22,24 @@ interface ChronoCardProps {
   onExpire?: () => void;
 }
 
-const ChronoCardComponent = ({ targetDate, startDate, isUrgent, compact = false, invertProgress = false, onExpire }: ChronoCardProps) => {
-  const countdown = useCountdown(targetDate, startDate);
-  const expiredTargetRef = useRef<string | null>(null);
+const ChronoCardComponent = ({ 
+  taskId, 
+  targetDate, 
+  startDate, 
+  isUrgent, 
+  compact = false, 
+  invertProgress = false, 
+  onExpire 
+}: ChronoCardProps) => {
+  // 使用新的高性能 Hook
+  const countdown = useCountdownManager(taskId, targetDate, startDate, onExpire);
 
-  useEffect(() => {
-    if (!countdown.isExpired) {
-      expiredTargetRef.current = null;
-      return;
-    }
-    if (expiredTargetRef.current === targetDate) {
-      return;
-    }
-    expiredTargetRef.current = targetDate;
-    onExpire?.();
-  }, [countdown.isExpired, onExpire, targetDate]);
-
-  const displayProgress = invertProgress ? Math.max(0, Math.min(100, 100 - countdown.progress)) : countdown.progress;
+  // 计算显示进度
+  const displayProgress = countdown.isExpired 
+    ? (invertProgress ? 0 : 100) // 过期时：反向进度条显示0%（空），正向进度条显示100%（满）
+    : invertProgress 
+      ? Math.max(0, Math.min(100, 100 - countdown.progress)) 
+      : countdown.progress;
 
   // 格式化时间显示
   const formatTime = () => {
@@ -221,6 +223,7 @@ const ChronoCardComponent = ({ targetDate, startDate, isUrgent, compact = false,
 // Only re-render when props actually change
 export const ChronoCard = memo(ChronoCardComponent, (prevProps, nextProps) => {
   return (
+    prevProps.taskId === nextProps.taskId &&
     prevProps.targetDate === nextProps.targetDate &&
     prevProps.startDate === nextProps.startDate &&
     prevProps.isUrgent === nextProps.isUrgent &&

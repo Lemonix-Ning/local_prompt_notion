@@ -1,0 +1,24 @@
+{
+  "id": "493907df-9932-4346-91f5-64e1b5990806",
+  "title": "[TEST] One-time in 2 min",
+  "slug": "TEST_One_time_in_2_min",
+  "created_at": "2026-01-25T13:55:46.409Z",
+  "updated_at": "2026-01-25T13:55:46.409Z",
+  "tags": [
+    "test",
+    "task"
+  ],
+  "version": "1.0.0",
+  "author": "AutoTest",
+  "model_config": {
+    "default_model": "gpt-4",
+    "temperature": 0.7,
+    "top_p": 1
+  },
+  "is_favorite": false,
+  "category": "Tasks",
+  "category_path": "D:\\workspace\\projects\\local_prompt_notion_complete\\Lumina\\sample-vault\\Tasks",
+  "type": "TASK",
+  "scheduled_time": "2026-01-25T13:57:46.409Z",
+  "recurrence": null
+}

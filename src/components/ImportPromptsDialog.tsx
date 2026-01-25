@@ -4,12 +4,15 @@
  */
 
 import React, { useState, useRef, useCallback, useMemo } from 'react';
-import { X, Upload, FileJson, AlertCircle, CheckCircle, XCircle, Clock, Plus, ChevronDown, FolderTree, FileText, Folder, FolderOpen } from 'lucide-react';
+import { X, Upload, FileJson, Clock, Plus, ChevronDown, FolderTree, FileText, Folder, FolderOpen } from 'lucide-react';
 import { useApp } from '../AppContext';
 import { useToast } from '../contexts/ToastContext';
 import api from '../api/client';
+import { tauriClient } from '../api/tauriClient';
+import { isTauriEnv } from '../utils/tauriEnv';
 import type { CategoryNode } from '../types';
 import { NewPromptOverlay } from './NewPromptOverlay';
+import { useLumi } from '../contexts/LumiContext';
 
 interface ImportPromptData {
   title: string;
@@ -54,6 +57,7 @@ export const ImportPromptsDialog: React.FC<ImportPromptsDialogProps> = ({
 }) => {
   const { state, refreshVault, createCategory } = useApp();
   const { showToast } = useToast();
+  const { triggerTransfer, notifyMessage } = useLumi();
 
   const [isDragging, setIsDragging] = useState(false);
   const [prompts, setPrompts] = useState<ImportPromptData[]>([]);
@@ -199,7 +203,7 @@ export const ImportPromptsDialog: React.FC<ImportPromptsDialogProps> = ({
 
     try {
       await createCategory(state.fileSystem?.root || '', newCategoryName.trim());
-      showToast('分类创建成功', 'success');
+      notifyMessage('分类创建成功');
       
       // 刷新后选择新建的分类
       await refreshVault();
@@ -282,7 +286,7 @@ export const ImportPromptsDialog: React.FC<ImportPromptsDialogProps> = ({
 
     if (allPrompts.length > 0) {
       setPrompts(allPrompts);
-      showToast(`已加载 ${allPrompts.length} 个提示词`, 'success');
+      notifyMessage(`已加载 ${allPrompts.length} 个提示词`);
     }
   }, [parseJsonFile, showToast]);
 
@@ -311,6 +315,7 @@ export const ImportPromptsDialog: React.FC<ImportPromptsDialogProps> = ({
     }
 
     setIsImporting(true);
+    triggerTransfer('importing');
 
     try {
       // 确定目标分类路径（仅用于没有 category_path 的提示词）
@@ -324,24 +329,18 @@ export const ImportPromptsDialog: React.FC<ImportPromptsDialogProps> = ({
       }
 
       // 注意：如果提示词自带 category_path，后端会优先使用提示词的 category_path
-      const response = await api.prompts.import({
+      const client = isTauriEnv() ? tauriClient : api;
+      const response = await client.prompts.import({
         prompts,
         categoryPath: targetPath,
         conflictStrategy,
       });
 
       if (response.success && response.data) {
-        setImportResults(response.data);
-        
-        // 刷新 Vault
         await refreshVault();
-
-        // 显示总结
-        const { success, failed, skipped, total } = response.data;
-        showToast(
-          `导入完成: 成功 ${success}/${total}, 失败 ${failed}, 跳过 ${skipped}`,
-          success > 0 ? 'success' : 'error'
-        );
+        handleReset();
+        onClose();
+        onClosed();
       } else {
         showToast(response.error || '导入失败', 'error');
       }
@@ -691,80 +690,7 @@ export const ImportPromptsDialog: React.FC<ImportPromptsDialogProps> = ({
                 </div>
               )}
 
-          {/* 导入结果 */}
-          {importResults && (
-            <div className="space-y-4">
-              <div className="flex items-center justify-between">
-                <h3 className="text-lg font-medium text-gray-900 dark:text-white">
-                  导入结果
-                </h3>
-                <button
-                  onClick={handleReset}
-                  className="px-4 py-2 bg-indigo-500 hover:bg-indigo-600 dark:bg-indigo-600 dark:hover:bg-indigo-500 text-white rounded-lg transition-colors shadow-sm font-medium"
-                >
-                  继续导入
-                </button>
-              </div>
-
-              {/* 统计信息 */}
-              <div className="grid grid-cols-4 gap-4">
-                <div className="p-4 bg-white dark:bg-zinc-900 rounded-lg border border-gray-200 dark:border-zinc-700 shadow-sm">
-                  <p className="text-sm text-gray-500 dark:text-gray-400">总计</p>
-                  <p className="text-2xl font-bold text-gray-900 dark:text-white">
-                    {importResults.total}
-                  </p>
-                </div>
-                <div className="p-4 bg-green-50 dark:bg-green-950/30 rounded-lg border border-green-200 dark:border-green-900/50 shadow-sm">
-                  <p className="text-sm text-green-600 dark:text-green-400 font-medium">成功</p>
-                  <p className="text-2xl font-bold text-green-600 dark:text-green-400">
-                    {importResults.success}
-                  </p>
-                </div>
-                <div className="p-4 bg-red-50 dark:bg-red-950/30 rounded-lg border border-red-200 dark:border-red-900/50 shadow-sm">
-                  <p className="text-sm text-red-600 dark:text-red-400 font-medium">失败</p>
-                  <p className="text-2xl font-bold text-red-600 dark:text-red-400">
-                    {importResults.failed}
-                  </p>
-                </div>
-                <div className="p-4 bg-yellow-50 dark:bg-yellow-950/30 rounded-lg border border-yellow-200 dark:border-yellow-900/50 shadow-sm">
-                  <p className="text-sm text-yellow-600 dark:text-yellow-400 font-medium">跳过</p>
-                  <p className="text-2xl font-bold text-yellow-600 dark:text-yellow-400">
-                    {importResults.skipped}
-                  </p>
-                </div>
-              </div>
-
-              {/* 详细结果 */}
-              <div className="max-h-96 overflow-y-auto space-y-2 bg-gray-50 dark:bg-zinc-950 rounded-lg p-4 border border-gray-200 dark:border-zinc-700 shadow-sm">
-                {importResults.details.map((result, index) => (
-                  <div
-                    key={index}
-                    className="flex items-start gap-3 p-3 bg-white dark:bg-zinc-900 rounded border border-gray-200 dark:border-zinc-700"
-                  >
-                    {result.status === 'success' && (
-                      <CheckCircle className="w-5 h-5 text-green-500 dark:text-green-400 flex-shrink-0 mt-0.5" />
-                    )}
-                    {result.status === 'failed' && (
-                      <XCircle className="w-5 h-5 text-red-500 dark:text-red-400 flex-shrink-0 mt-0.5" />
-                    )}
-                    {result.status === 'skipped' && (
-                      <AlertCircle className="w-5 h-5 text-yellow-500 dark:text-yellow-400 flex-shrink-0 mt-0.5" />
-                    )}
-                    <div className="flex-1 min-w-0">
-                      <p className="font-medium text-gray-900 dark:text-white truncate">
-                        {result.title}
-                      </p>
-                      {(result.error || result.reason) && (
-                        <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-                          {result.error || result.reason}
-                        </p>
-                      )}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
+          {/* 导入结果 UI 已移除 */}
         </div>
 
         {/* 底部操作栏 */}

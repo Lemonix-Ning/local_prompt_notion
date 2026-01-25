@@ -4,7 +4,8 @@ import path from 'path';
 import { visualizer } from 'rollup-plugin-visualizer';
 
 // https://vitejs.dev/config/
-export default defineConfig({
+export default defineConfig(({ command }) => ({
+  base: command === 'build' ? './' : '/',
   plugins: [
     react(),
     visualizer({
@@ -30,20 +31,9 @@ export default defineConfig({
     // Set chunk size warning limit to 300KB
     chunkSizeWarningLimit: 300,
     
-    // Minification settings
-    minify: 'terser',
-    terserOptions: {
-      compress: {
-        // Remove console.log in production
-        drop_console: true,
-        drop_debugger: true,
-        pure_funcs: ['console.log', 'console.debug', 'console.info'],
-      },
-      format: {
-        // Remove comments
-        comments: false,
-      },
-    },
+    // 🔥 使用 esbuild 压缩而不是 terser
+    // esbuild 更快，问题更少，避免循环依赖问题
+    minify: 'esbuild',
     
     rollupOptions: {
       output: {
@@ -53,18 +43,20 @@ export default defineConfig({
           const normalized = id.replace(/\\/g, '/');
 
           if (normalized.includes('/node_modules/')) {
-            if (
-              normalized.includes('/react-markdown/') ||
-              normalized.includes('/remark-gfm/') ||
-              normalized.includes('/rehype-highlight/') ||
-              normalized.includes('/unified/') ||
-              normalized.includes('/micromark') ||
-              normalized.includes('/mdast-') ||
-              normalized.includes('/hast-') ||
-              normalized.includes('/vfile')
-            ) {
-              return 'markdown';
-            }
+            // 🔥 不要将 markdown 相关库分离到单独的 chunk
+            // 这会导致循环依赖问题："Cannot access 'convert' before initialization"
+            // if (
+            //   normalized.includes('/react-markdown/') ||
+            //   normalized.includes('/remark-gfm/') ||
+            //   normalized.includes('/rehype-highlight/') ||
+            //   normalized.includes('/unified/') ||
+            //   normalized.includes('/micromark') ||
+            //   normalized.includes('/mdast-') ||
+            //   normalized.includes('/hast-') ||
+            //   normalized.includes('/vfile')
+            // ) {
+            //   return 'markdown';
+            // }
 
             if (normalized.includes('/highlight.js/')) {
               return 'highlight';
@@ -92,4 +84,4 @@ export default defineConfig({
       },
     },
   },
-});
+}));

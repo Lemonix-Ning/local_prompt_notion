@@ -3,9 +3,6 @@
  * Notion 风格的卡片网格布局
  */
 
-// 🚨 TEMP: disable legacy interval scanner (V2 migration)
-const ENABLE_LEGACY_INTERVAL = false;
-
 import {
   Plus,
   Copy,
@@ -50,8 +47,10 @@ import { ExportPromptsDialog } from './ExportPromptsDialog';
 import { useSystemNotification } from '../hooks/useSystemNotification';
 import { useIntervalTasks } from '../hooks/useIntervalTasks';
 import { generateRecurrenceTag, generateScheduledTimeTag, getNextTriggerTime } from '../utils/recurrenceTag';
+import { setMonitoringMode } from '../utils/performanceMonitor';
 import type { PromptData, RecurrenceConfig } from '../types';
 import { useVirtualScroll } from '../utils/virtualScroll';
+import { isTauriEnv } from '../utils/tauriEnv';
 
 function SpotlightCard({
   children,
@@ -142,6 +141,8 @@ function SpotlightCard({
   );
 }
 
+const ENABLE_LEGACY_INTERVAL = !isTauriEnv();
+
 // 保留旧函数作为备用，现在直接使用新的哈希颜色系统
 const getTagColor = (tag: string) => {
   return getTagStyle(tag);
@@ -210,7 +211,36 @@ export function PromptList() {
   // 🔥 V2: 使用后端调度器，前端只负责轮询和显示
   const apiBaseUrl = 'http://localhost:3001';
   
-  const { pendingTasks, acknowledgeTask, refresh: refreshPendingTasks } = useIntervalTasks(apiBaseUrl, true);
+  const { pendingTasks, acknowledgeTask } = useIntervalTasks(apiBaseUrl, true);
+
+  const updateMonitoringMode = useCallback(() => {
+    if (typeof document === 'undefined') return;
+    if (document.visibilityState !== 'visible') {
+      setMonitoringMode('background');
+      return;
+    }
+    const hasTasks = pendingTasks.length > 0 || Boolean(alertTask);
+    setMonitoringMode(hasTasks ? 'tasking' : 'normal');
+  }, [pendingTasks.length, alertTask]);
+
+  useEffect(() => {
+    updateMonitoringMode();
+  }, [updateMonitoringMode]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const handleVisibility = () => {
+      updateMonitoringMode();
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
+    window.addEventListener('focus', handleVisibility);
+    window.addEventListener('blur', handleVisibility);
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibility);
+      window.removeEventListener('focus', handleVisibility);
+      window.removeEventListener('blur', handleVisibility);
+    };
+  }, [updateMonitoringMode]);
 
   useEffect(() => {
     if (!alertTask) {
@@ -228,6 +258,43 @@ export function PromptList() {
     // @ts-ignore - Reserved for future use
     isSupported: notificationSupported,
   } = useSystemNotification();
+
+  const handleCountdownExpire = useCallback(async (
+    prompt: PromptData,
+    targetDate: string,
+    isRecurring: boolean
+  ) => {
+    console.log('[CountdownExpire] 触发:', {
+      taskId: prompt.meta.id,
+      title: prompt.meta.title,
+      targetDate,
+      isRecurring,
+      hasPendingTask: pendingTasks.some(task => task.meta.id === prompt.meta.id),
+    });
+    
+    if (!targetDate) {
+      console.log('[CountdownExpire] 跳过: 无目标日期');
+      return;
+    }
+    
+    const key = `${prompt.meta.id}:${targetDate}`;
+    if (countdownNotifiedRef.current.has(key)) {
+      console.log('[CountdownExpire] 跳过: 已通知过', key);
+      return;
+    }
+    
+    // 注意：不检查 pendingTasks，因为倒计时到期应该独立触发
+    // if (pendingTasks.some(task => task.meta.id === prompt.meta.id)) {
+    //   console.log('[CountdownExpire] 跳过: 任务已在待处理列表');
+    //   return;
+    // }
+    
+    countdownNotifiedRef.current.add(key);
+    console.log('[CountdownExpire] 执行通知:', prompt.meta.title);
+    triggerTime('alarm');
+    notifyMessage(`⏰ ${prompt.meta.title} 到期`);
+    await sendTaskReminder(prompt.meta.id, prompt.meta.title, true, isRecurring);
+  }, [notifyMessage, sendTaskReminder, triggerTime]);
   
   // ========== Import Dialog (导入对话框) ==========
   const [showImportDialog, setShowImportDialog] = useState<boolean>(false);
@@ -328,6 +395,16 @@ export function PromptList() {
     return todayTrigger.toISOString();
   };
 
+  // 🔥 计算 interval 任务的当前周期开始时间
+  // 确保 startDate 和 targetDate 是配对的，避免进度条计算错误
+  const getIntervalCycleStart = (intervalMinutes: number, _baselineStr: string, targetDateStr: string): string => {
+    // 直接使用 targetDate - interval 作为 startDate
+    // 这样可以确保 startDate 和 targetDate 始终配对
+    const targetDate = new Date(targetDateStr).getTime();
+    const intervalMs = intervalMinutes * 60 * 1000;
+    return new Date(targetDate - intervalMs).toISOString();
+  };
+
   const fireworkParticles = useMemo(() => {
     return Array.from({ length: 8 }).map((_, i) => {
       const angle = (i * 45) * (Math.PI / 180);
@@ -363,17 +440,6 @@ export function PromptList() {
     return null;
   }, [allPrompts]);
   
-  // 🔥 调试：检查数据是否加载
-  useEffect(() => {
-    console.log('[PromptList Debug]', {
-      hasFileSystem: !!state.fileSystem,
-      allPromptsCount: state.fileSystem?.allPrompts.size || 0,
-      filteredPromptsCount: allPrompts.length,
-      selectedCategory: state.selectedCategory,
-      searchQuery: state.searchQuery,
-    });
-  }, [state.fileSystem, allPrompts.length, state.selectedCategory, state.searchQuery]);
-  
   const isModalOpen = uiState.newPromptModal.isOpen;
   const preselectedCategory = uiState.newPromptModal.preselectedCategory;
   
@@ -381,6 +447,7 @@ export function PromptList() {
   const VIRTUAL_SCROLL_THRESHOLD = 50;
   const CARD_HEIGHT = 272; // 64 (h-64) * 4 (1rem = 4px) + gap
   const [containerHeight, setContainerHeight] = useState(800);
+  const [gridColumns, setGridColumns] = useState(3);
   const elasticScrollRef = useRef<HTMLDivElement>(null);
   const lastScrollRef = useRef<{ y: number; t: number }>({ y: 0, t: Date.now() });
   
@@ -388,8 +455,10 @@ export function PromptList() {
   const enableVirtualScroll = allPrompts.length > VIRTUAL_SCROLL_THRESHOLD;
   
   // Use virtual scroll hook
-  const { visibleItems, totalHeight, offsetY, onScroll } = useVirtualScroll(
-    allPrompts,
+  const rowCount = Math.ceil(allPrompts.length / gridColumns);
+  const rows = useMemo(() => Array.from({ length: rowCount }, (_, index) => index), [rowCount]);
+  const { visibleItems: visibleRows, totalHeight, offsetY, onScroll } = useVirtualScroll(
+    rows,
     {
       itemHeight: CARD_HEIGHT,
       overscan: 3,
@@ -399,7 +468,13 @@ export function PromptList() {
   );
   
   // Use visible items when virtual scrolling is enabled, otherwise use all prompts
-  const prompts = enableVirtualScroll ? visibleItems : allPrompts;
+  const startRow = enableVirtualScroll ? (visibleRows[0] ?? 0) : 0;
+  const endRow = enableVirtualScroll
+    ? (visibleRows.length ? visibleRows[visibleRows.length - 1] + 1 : 0)
+    : rowCount;
+  const prompts = enableVirtualScroll
+    ? allPrompts.slice(startRow * gridColumns, endRow * gridColumns)
+    : allPrompts;
   
   // Attach scroll listener to ElasticScroll's inner div
   useEffect(() => {
@@ -430,6 +505,9 @@ export function PromptList() {
     // Update container height
     const updateHeight = () => {
       setContainerHeight(scrollableDiv.clientHeight);
+      const width = scrollableDiv.clientWidth;
+      const columns = width >= 1024 ? 3 : width >= 768 ? 2 : 1;
+      setGridColumns(columns);
     };
     updateHeight();
     window.addEventListener('resize', updateHeight);
@@ -448,6 +526,7 @@ export function PromptList() {
   const dismissedAlertsRef = useRef<Set<string>>(new Set());
   const notifiedTasksRef = useRef<Set<string>>(new Set());
   const alertTaskRef = useRef<PromptData | null>(null);
+  const countdownNotifiedRef = useRef<Set<string>>(new Set());
   const autoTrashedOneTimeRef = useRef<Set<string>>(new Set());
   const sessionStartedAtRef = useRef<number>(Date.now());
   const firstScanRef = useRef<boolean>(true);
@@ -1144,7 +1223,7 @@ export function PromptList() {
     const durationMs = alertTask.meta.recurrence?.enabled ? 3000 : 2000;
     notifyMessage(`${title} · ${alertTask.meta.title}`, durationMs);
     if (alertTask.meta.recurrence?.enabled) {
-      triggerTime('countdown', 3000);
+      triggerTime('alarm', 3000);
     } else {
       triggerTime('schedule', 2000);
     }
@@ -1221,7 +1300,7 @@ export function PromptList() {
         setTimeout(async () => {
           try {
             await deletePrompt(taskId, false); // false = 移动到回收站
-            showToast('任务已移至回收站', 'success');
+            notifyMessage('任务已移至回收站');
           } catch (error) {
             showToast('移动失败', 'error');
           } finally {
@@ -1279,6 +1358,7 @@ export function PromptList() {
       if (dueOneTimeTasks.length === 0) return;
 
       const nextTask = dueOneTimeTasks[0];
+      void handleCountdownExpire(nextTask, nextTask.meta.scheduled_time ?? '', false);
       autoTrashedOneTimeRef.current.add(nextTask.meta.id);
       setAlertTask(nextTask);
     };
@@ -1343,6 +1423,11 @@ export function PromptList() {
       const triggerKey = new Date().toISOString().slice(0, 10);
       recurringNotifiedRef.current.set(nextTask.meta.id, triggerKey);
       setAlertTask(nextTask);
+      void handleCountdownExpire(
+        nextTask,
+        getNextTriggerTime(nextTask.meta.recurrence!, nextTask.meta.last_notified ?? nextTask.meta.created_at),
+        true
+      );
       const nowIso = new Date().toISOString();
       const updated = {
         ...nextTask,
@@ -2167,7 +2252,7 @@ export function PromptList() {
       handleCancelCreateSubCategoryFromDropdown();
       setIsCategoryOpen(false);
       setCategoryQuery('');
-      showToast('分类创建成功', 'success');
+      notifyMessage('分类创建成功');
     } catch (error) {
       showToast(`创建分类失败: ${(error as Error).message}`, 'error');
     }
@@ -2195,7 +2280,7 @@ export function PromptList() {
   const handleCopy = (text: string) => {
     navigator.clipboard.writeText(text)
       .then(() => {
-        showToast("已复制到剪贴板", 'success');
+        notifyMessage("已复制到剪贴板");
         triggerAction('clipboard');
       })
       .catch(() => showToast("复制失败", 'error'));
@@ -2290,7 +2375,6 @@ export function PromptList() {
       });
       
       if (confirmed) {
-        triggerAction('delete');
         setDeletingIds(prev => {
           const next = new Set(prev);
           next.add(promptId);
@@ -2299,7 +2383,8 @@ export function PromptList() {
         window.setTimeout(async () => {
           try {
             await deletePrompt(promptId, true);
-            showToast("已永久删除", 'success');
+            notifyMessage("已永久删除");
+            triggerAction('delete');
           } catch (error) {
             showToast("删除失败", 'error');
           } finally {
@@ -2312,7 +2397,6 @@ export function PromptList() {
         }, 600);
       }
     } else {
-      triggerAction('delete');
       // 不在回收站,直接移动到回收站（带动画 + 队列合并 toast）
       setDeletingIds(prev => {
         const next = new Set(prev);
@@ -2336,10 +2420,11 @@ export function PromptList() {
           deleteQueueRef.current.timer = setTimeout(() => {
             const count = deleteQueueRef.current.count;
             if (count === 1) {
-              showToast("已移动到回收站，可从回收站恢复", 'success');
+              notifyMessage("已移动到回收站，可从回收站恢复");
             } else {
-              showToast(`已移动 ${count} 个提示词到回收站`, 'success');
+              notifyMessage(`已移动 ${count} 个提示词到回收站`);
             }
+            triggerAction('delete');
             deleteQueueRef.current.count = 0;
             deleteQueueRef.current.timer = null;
           }, 300); // 300ms 内的删除操作合并
@@ -2361,7 +2446,7 @@ export function PromptList() {
     try {
       await restorePrompt(promptId);
       triggerAction('restore');
-      showToast("已恢复", 'success');
+      notifyMessage("已恢复");
     } catch (error) {
       console.error('[Restore] Failed to restore prompt:', error);
       const errorMessage = error instanceof Error ? error.message : '未知错误';
@@ -2601,7 +2686,7 @@ export function PromptList() {
         
         // 根据结果显示不同的提示
         if (failCount === 0) {
-          showToast(`✅ 已永久删除 ${successCount} 个提示词`, 'success');
+          notifyMessage(`✅ 已永久删除 ${successCount} 个提示词`);
         } else if (successCount === 0) {
           showToast("❌ 批量删除失败", 'error');
         } else {
@@ -2637,7 +2722,7 @@ export function PromptList() {
         
         // 根据结果显示不同的提示
         if (failCount === 0) {
-          showToast(`✅ 已永久删除 ${successCount} 个提示词`, 'success');
+          notifyMessage(`✅ 已永久删除 ${successCount} 个提示词`);
         } else if (successCount === 0) {
           showToast("❌ 批量删除失败", 'error');
         } else {
@@ -2799,7 +2884,7 @@ export function PromptList() {
       clearNewPromptDraft();
       // 创建成功：直接关闭，不走 persist（否则可能把旧值误写回草稿）
       setNewPromptOverlayOpen(false);
-      showToast("已创建新提示词", 'success');
+      notifyMessage("已创建新提示词");
     } catch (error) {
       showToast('创建失败: ' + (error as Error).message, 'error');
     }
@@ -2940,7 +3025,7 @@ export function PromptList() {
           {/* Content Toolbar */}
           <div className="flex items-center justify-between mb-6">
             <div className="flex items-center gap-2 text-sm text-muted-foreground">
-              <span className="font-medium text-foreground">{prompts.length}</span> 个项目
+              <span className="font-medium text-foreground">{allPrompts.length}</span> 个项目
               {selectedCategory === 'trash' && batchSelectMode && (
                 <span className="text-primary">
                   · 已选择 {selectedIds.size} 个
@@ -3359,37 +3444,55 @@ export function PromptList() {
                         </div>
                         {/* 使用原有的 ChronoCard 显示倒计时 */}
                         <ChronoCard
+                          taskId={prompt.meta.id}
                           key={`chrono-${prompt.meta.id}-${prompt.meta.recurrence.type === 'interval' ? prompt.meta.recurrence.intervalMinutes : 'other'}-${prompt.meta.last_notified || prompt.meta.created_at}`}
-                          targetDate={getNextTriggerTime(
-                            prompt.meta.recurrence,
-                            prompt.meta.last_notified ?? prompt.meta.created_at
-                          )}
+                          targetDate={(() => {
+                            const targetDate = getNextTriggerTime(
+                              prompt.meta.recurrence,
+                              prompt.meta.last_notified ?? prompt.meta.created_at
+                            );
+                            return targetDate;
+                          })()}
                           startDate={
                             prompt.meta.recurrence.type === 'interval'
-                              ? (prompt.meta.last_notified ?? prompt.meta.created_at)
+                              ? getIntervalCycleStart(
+                                  prompt.meta.recurrence.intervalMinutes || 1,
+                                  prompt.meta.last_notified ?? prompt.meta.created_at,
+                                  getNextTriggerTime(
+                                    prompt.meta.recurrence,
+                                    prompt.meta.last_notified ?? prompt.meta.created_at
+                                  )
+                                )
                               : ['daily', 'weekly', 'monthly'].includes(prompt.meta.recurrence.type)
                               ? getRecurringCycleStart(prompt.meta.recurrence)
                               : prompt.meta.created_at
                           }
                           invertProgress={prompt.meta.recurrence.type === 'interval'}
-                          onExpire={async () => {
-                            if (!prompt.meta.recurrence?.enabled || prompt.meta.recurrence.type !== 'interval') return;
-                            try {
-                              await fetch(`${apiBaseUrl}/api/interval-tasks/${prompt.meta.id}/notify`, { method: 'POST' });
-                              await refreshPendingTasks();
-                            } catch (error) {
-                              console.error('[Countdown] Failed to notify interval task:', error);
-                            }
+                          onExpire={() => {
+                            if (!prompt.meta.recurrence?.enabled) return;
+                            // 所有重复任务（包括 interval）都调用 handleCountdownExpire
+                            void handleCountdownExpire(
+                              prompt,
+                              getNextTriggerTime(
+                                prompt.meta.recurrence,
+                                prompt.meta.last_notified ?? prompt.meta.created_at
+                              ),
+                              true
+                            );
                           }}
                         />
                       </div>
                     ) : prompt.meta.scheduled_time && !isInTrash ? (
                       /* 一次性任务：显示倒计时 */
                       <ChronoCard
+                        taskId={prompt.meta.id}
                         key={`chrono-${prompt.meta.id}-${prompt.meta.scheduled_time}`}
                         targetDate={prompt.meta.scheduled_time}
                         startDate={prompt.meta.created_at}
                         isUrgent={new Date(prompt.meta.scheduled_time).getTime() - Date.now() < 3600000}
+                        onExpire={() => {
+                          void handleCountdownExpire(prompt, prompt.meta.scheduled_time ?? '', false);
+                        }}
                       />
                     ) : isInTrash ? (
                       <div className="flex items-center gap-2 px-3 py-1.5 rounded-md bg-muted/60 border border-border text-muted-foreground">
@@ -3460,7 +3563,7 @@ export function PromptList() {
           </div>
 
           {/* Empty State */}
-          {prompts.length === 0 && (
+          {allPrompts.length === 0 && (
             <EmptyState
               title="这里还是空的"
               description={

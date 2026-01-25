@@ -11,6 +11,7 @@ const {
   collectAllPrompts,
   normalizePromptsCategoryPath,
   loadPromptsInDirectory,
+  loadPromptsRecursivelyInDirectory,
 } = require('../utils/fileSystem');
 
 const rawVaultPath = process.env.VAULT_PATH && process.env.VAULT_PATH.trim();
@@ -49,7 +50,7 @@ router.get('/scan', async (req, res, next) => {
 
     // 🔥 单独扫描回收站目录
     const trashPath = path.join(VAULT_ROOT, 'trash');
-    const trashPrompts = await loadPromptsInDirectory(trashPath);
+    const trashPrompts = await loadPromptsRecursivelyInDirectory(trashPath);
     allPrompts.push(...trashPrompts);
 
     // 转换为 Map 格式

@@ -10,6 +10,7 @@ use serde_json::Value;
 
 use super::{CachedTask, SchedulerState};
 
+#[allow(dead_code)]
 #[derive(Debug)]
 pub enum ScanError {
     Io(io::Error),
@@ -21,6 +22,7 @@ impl From<io::Error> for ScanError {
     }
 }
 
+#[allow(dead_code)]
 #[derive(Debug)]
 pub enum ParseError {
     Io(io::Error),

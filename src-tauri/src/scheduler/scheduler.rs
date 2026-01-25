@@ -30,7 +30,8 @@ pub struct CachedTask {
 impl CachedTask {
     #[inline]
     pub fn next_trigger_time(&self) -> i64 {
-        self.last_notified + (self.interval_minutes as i64 * 60)
+        let interval_minutes = self.interval_minutes.max(1) as i64;
+        self.last_notified + (interval_minutes * 60)
     }
 
     #[inline]
@@ -39,6 +40,7 @@ impl CachedTask {
     }
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TaskMetadata {
     pub id: String,
@@ -49,6 +51,7 @@ pub struct TaskMetadata {
     pub file_path: PathBuf,
 }
 
+#[allow(dead_code)]
 impl TaskMetadata {
     pub fn last_notified_timestamp(&self) -> Option<i64> {
         self.last_notified.map(|value| value.timestamp())
@@ -94,6 +97,7 @@ pub struct SchedulerState {
     pub vault_path: PathBuf,
 }
 
+#[allow(dead_code)]
 #[derive(Debug)]
 pub enum SchedulerError {
     Io(std::io::Error),

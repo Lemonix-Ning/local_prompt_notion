@@ -78,11 +78,8 @@ export class StartupTimer {
       clearTimeout(this.timeoutTimer);
       this.timeoutTimer = null;
       
-      // Log success if under threshold
       const totalTime = this.getElapsed('interactive');
-      if (totalTime < this.timeoutWarning) {
-        console.log(`[Performance] Startup completed in ${totalTime.toFixed(0)}ms ✅`);
-      } else {
+      if (totalTime >= this.timeoutWarning) {
         console.warn(`[Performance] Startup completed in ${totalTime.toFixed(0)}ms (exceeded ${this.timeoutWarning}ms threshold)`);
       }
     }
@@ -178,9 +175,7 @@ export class MemoryMonitor {
     if (usage > this.maxThreshold) {
       console.error(`❌ Memory usage exceeded ${this.maxThreshold / 1024 / 1024}MB: ${(usage / 1024 / 1024).toFixed(1)}MB`);
       
-      // Trigger garbage collection if available (Chrome DevTools)
       if ('gc' in window && typeof (window as any).gc === 'function') {
-        console.log('[Performance] Triggering garbage collection...');
         try {
           (window as any).gc();
         } catch (error) {
@@ -272,6 +267,18 @@ export class MemoryMonitor {
     }
 
     return { current, peak, average, trend };
+  }
+
+  setMaxSamples(limit: number): void {
+    this.maxSamples = Math.max(1, limit);
+    this.trimSamples();
+  }
+
+  trimSamples(limit?: number): void {
+    const target = Math.max(1, limit ?? this.maxSamples);
+    if (this.samples.length > target) {
+      this.samples = this.samples.slice(-target);
+    }
   }
 }
 
@@ -367,6 +374,18 @@ export class CPUMonitor {
     if (this.samples.length === 0) return 0;
     return this.samples[this.samples.length - 1].usage;
   }
+
+  setMaxSamples(limit: number): void {
+    this.maxSamples = Math.max(1, limit);
+    this.trimSamples();
+  }
+
+  trimSamples(limit?: number): void {
+    const target = Math.max(1, limit ?? this.maxSamples);
+    if (this.samples.length > target) {
+      this.samples = this.samples.slice(-target);
+    }
+  }
 }
 
 /**
@@ -376,51 +395,116 @@ export const startupTimer = new StartupTimer();
 export const memoryMonitor = new MemoryMonitor();
 export const cpuMonitor = new CPUMonitor();
 
-/**
- * Start automatic monitoring
- */
-export function startPerformanceMonitoring(interval: number = 5000): () => void {
-  // Sample memory every interval
-  const memoryInterval = setInterval(() => {
+export type MonitoringMode = 'normal' | 'tasking' | 'background';
+
+type MonitoringOptions = {
+  memoryInterval: number;
+  cpuInterval: number;
+  statsInterval: number;
+  memorySamples: number;
+  cpuSamples: number;
+};
+
+const baseMonitoringOptions: MonitoringOptions = {
+  memoryInterval: 5000,
+  cpuInterval: 1000,
+  statsInterval: 60000,
+  memorySamples: 100,
+  cpuSamples: 60,
+};
+
+const monitoringPresets: Record<MonitoringMode, MonitoringOptions> = {
+  normal: {
+    ...baseMonitoringOptions,
+  },
+  tasking: {
+    ...baseMonitoringOptions,
+    memoryInterval: 3000,
+    statsInterval: 30000,
+  },
+  background: {
+    ...baseMonitoringOptions,
+    memoryInterval: 30000,
+    cpuInterval: 5000,
+    statsInterval: 0,
+    memorySamples: 20,
+    cpuSamples: 20,
+  },
+};
+
+function resolveMonitoringOptions(options?: number | Partial<MonitoringOptions>): MonitoringOptions {
+  if (typeof options === 'number') {
+    return { ...baseMonitoringOptions, memoryInterval: options };
+  }
+  return { ...baseMonitoringOptions, ...options };
+}
+
+export function startPerformanceMonitoring(options?: number | Partial<MonitoringOptions>): () => void {
+  const resolved = resolveMonitoringOptions(options);
+  memoryMonitor.setMaxSamples(resolved.memorySamples);
+  cpuMonitor.setMaxSamples(resolved.cpuSamples);
+  memoryMonitor.trimSamples();
+  cpuMonitor.trimSamples();
+
+  const memoryInterval = window.setInterval(() => {
     memoryMonitor.sample();
-  }, interval);
+  }, resolved.memoryInterval);
 
-  // Sample CPU every second
-  const cpuInterval = setInterval(() => {
+  const cpuInterval = window.setInterval(() => {
     cpuMonitor.sample();
-  }, 1000);
+  }, resolved.cpuInterval);
 
-  // Log stats in development
-  if (import.meta.env.DEV) {
-    const statsInterval = setInterval(() => {
-      const memStats = memoryMonitor.getStats();
-      const cpuUsage = cpuMonitor.getAverageUsage(60);
-      
-      // 🚀 优化：只在内存或 CPU 异常时才输出日志
-      const shouldLog = memStats.current > 100 || cpuUsage > 5 || memStats.trend === 'growing';
-      
-      if (shouldLog) {
-        console.log('[Performance]', {
-          memory: `${memStats.current.toFixed(1)}MB (peak: ${memStats.peak.toFixed(1)}MB, trend: ${memStats.trend})`,
-          cpu: `${cpuUsage.toFixed(1)}%`,
-        });
-      }
-
-      // Check for memory leaks
+  let statsInterval: number | null = null;
+  if (import.meta.env.DEV && resolved.statsInterval > 0) {
+    statsInterval = window.setInterval(() => {
       if (memoryMonitor.detectLeak()) {
         console.warn('⚠️ Potential memory leak detected');
       }
-    }, 60000); // 🚀 优化：从 30 秒改为 60 秒，减少日志频率
-
-    return () => {
-      clearInterval(memoryInterval);
-      clearInterval(cpuInterval);
-      clearInterval(statsInterval);
-    };
+    }, resolved.statsInterval);
   }
 
   return () => {
     clearInterval(memoryInterval);
     clearInterval(cpuInterval);
+    if (statsInterval !== null) {
+      clearInterval(statsInterval);
+    }
   };
+}
+
+export function startAdaptivePerformanceMonitoring(initialMode: MonitoringMode = 'normal') {
+  let mode = initialMode;
+  let stop = startPerformanceMonitoring(monitoringPresets[mode]);
+
+  const setMode = (nextMode: MonitoringMode) => {
+    if (mode === nextMode) return;
+    stop();
+    mode = nextMode;
+    stop = startPerformanceMonitoring(monitoringPresets[mode]);
+  };
+
+  const getMode = () => mode;
+
+  const stopAll = () => {
+    stop();
+  };
+
+  return { setMode, getMode, stop: stopAll };
+}
+
+let monitoringController: ReturnType<typeof startAdaptivePerformanceMonitoring> | null = null;
+
+export function registerMonitoringController(controller: ReturnType<typeof startAdaptivePerformanceMonitoring>) {
+  monitoringController = controller;
+  return () => {
+    if (monitoringController === controller) {
+      monitoringController = null;
+    }
+  };
+}
+
+export function setMonitoringMode(mode: MonitoringMode) {
+  if (monitoringController) {
+    monitoringController.setMode(mode);
+  }
 }

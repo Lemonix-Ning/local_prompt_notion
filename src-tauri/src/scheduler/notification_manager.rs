@@ -10,6 +10,7 @@ use serde_json::Value;
 use super::{CachedTask, TaskPayload};
 use super::file_ops::update_last_notified_only;
 
+#[allow(dead_code)]
 #[derive(Debug)]
 pub enum AcknowledgeError {
     Io(io::Error),

@@ -17,6 +17,7 @@ import { PromptData } from '../types';
 import { getSmartIcon } from '../utils/smartIcon';
 import { getIconGradientConfig } from '../utils/tagColors';
 import { useToast } from '../contexts/ToastContext';
+import { useLumi } from '../contexts/LumiContext';
 import { useConfirm } from '../contexts/ConfirmContext';
 import { useTheme } from '../contexts/ThemeContext';
 
@@ -28,6 +29,7 @@ interface EditorPageProps {
 export function EditorPage({ promptId, onClose }: EditorPageProps) {
   const { state, savePrompt, deletePrompt } = useApp();
   const { showToast } = useToast();
+  const { notifyMessage } = useLumi();
   useConfirm(); // 保留 hook 调用以维持 Context 订阅
   const { theme } = useTheme();
   const [formData, setFormData] = useState<PromptData | null>(null);
@@ -137,7 +139,7 @@ export function EditorPage({ promptId, onClose }: EditorPageProps) {
     try {
       await savePrompt(formData);
       setHasChanges(false);
-      showToast('保存成功', 'success');
+      notifyMessage('保存成功');
     } catch (error) {
       showToast('保存失败: ' + (error as Error).message, 'error');
     } finally {
@@ -151,7 +153,7 @@ export function EditorPage({ promptId, onClose }: EditorPageProps) {
     try {
       await deletePrompt(promptId);
       onClose();
-      showToast('已移动到回收站，可从回收站恢复', 'success');
+      notifyMessage('已移动到回收站，可从回收站恢复');
     } catch (error) {
       showToast('删除失败: ' + (error as Error).message, 'error');
     }

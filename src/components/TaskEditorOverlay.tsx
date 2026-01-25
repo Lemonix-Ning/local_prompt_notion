@@ -54,7 +54,7 @@ export function TaskEditorOverlay({ promptId, originCardId, onClose, promptIds, 
   const { theme } = useTheme();
   const { state, savePrompt, deletePrompt } = useApp();
   const { showToast } = useToast();
-  const { triggerAction } = useLumi();
+  const { triggerAction, notifyMessage } = useLumi();
 
   const [animationState, setAnimationState] = useState<AnimationState | null>(null);
   const [isClosing, setIsClosing] = useState(false);
@@ -395,7 +395,7 @@ export function TaskEditorOverlay({ promptId, originCardId, onClose, promptIds, 
           };
           await savePrompt(updated);
           triggerAction('update');
-          showToast("已保存更改", 'success');
+          notifyMessage("已保存更改");
         } catch (error) {
           showToast("保存失败", 'error');
         }
@@ -449,9 +449,9 @@ export function TaskEditorOverlay({ promptId, originCardId, onClose, promptIds, 
     
     if (window.confirm('确定要删除这个任务吗？')) {
       try {
-          await deletePrompt(prompt.meta.id, false);
+        await deletePrompt(prompt.meta.id, false);
+        notifyMessage("已移动到回收站");
         triggerAction('delete');
-        showToast("已移动到回收站", 'success');
         onClose();
       } catch (error) {
         showToast("删除失败", 'error');

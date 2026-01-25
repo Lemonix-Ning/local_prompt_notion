@@ -3,6 +3,7 @@ use tauri::{AppHandle, Emitter};
 
 use super::{SchedulerMode, TaskPayload};
 
+#[allow(dead_code)]
 #[derive(Debug)]
 pub enum EmitError {
     Tauri(tauri::Error),
@@ -34,6 +35,7 @@ pub fn emit_task_due_with<E: EventEmitter>(emitter: &E, task: &TaskPayload) -> R
     Ok(())
 }
 
+#[allow(dead_code)]
 pub fn emit_scheduler_mode_change(app_handle: &AppHandle, mode: SchedulerMode) -> Result<(), EmitError> {
     app_handle.emit("scheduler_mode_change", mode.to_string())?;
     Ok(())

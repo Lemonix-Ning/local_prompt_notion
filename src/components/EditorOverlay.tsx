@@ -28,6 +28,9 @@ import { useLumi } from '../contexts/LumiContext';
 import { useConfirm } from '../contexts/ConfirmContext';
 import { ContentSearchBar, type SearchMatch } from './ContentSearchBar';
 import { lazy, Suspense } from 'react';
+import { tauriClient } from '../api/tauriClient';
+import { isTauriEnv } from '../utils/tauriEnv';
+import { convertFileSrc } from '@tauri-apps/api/core';
 
 // Lazy load MarkdownRenderer to reduce initial bundle size
 const MarkdownRenderer = lazy(() => import('./MarkdownRenderer').then(module => ({ default: module.MarkdownRenderer })));
@@ -436,7 +439,7 @@ export function EditorOverlay({ promptId, originCardId, onClose, promptIds, onNa
   const { theme } = useTheme();
   const { state, savePrompt, deletePrompt } = useApp();
   const { showToast } = useToast();
-  const { triggerAction } = useLumi();
+  const { triggerAction, notifyMessage } = useLumi();
 
   useConfirm(); // 保留 hook 调用以维持 Context 订阅
   const [animationState, setAnimationState] = useState<AnimationState | null>(null);
@@ -468,6 +471,20 @@ export function EditorOverlay({ promptId, originCardId, onClose, promptIds, onNa
 
   // 图片粘贴状态
   const [isUploadingImage, setIsUploadingImage] = useState(false);
+  const [vaultRoot, setVaultRoot] = useState<string | null>(null);
+  const tauriEnv = isTauriEnv();
+
+  useEffect(() => {
+    if (!tauriEnv) return;
+    tauriClient.vault.root().then(setVaultRoot).catch(() => {});
+  }, [tauriEnv]);
+
+  const joinVaultPath = useCallback((root: string, rel: string) => {
+    const separator = root.includes('\\') ? '\\' : '/';
+    const cleanedRoot = root.replace(/[\\/]+$/, '');
+    const cleanedRel = rel.replace(/^\/+/, '').replace(/\//g, separator);
+    return `${cleanedRoot}${separator}${cleanedRel}`;
+  }, []);
 
   /**
    * 处理图片粘贴
@@ -507,25 +524,34 @@ export function EditorOverlay({ promptId, originCardId, onClose, promptIds, onNa
             try {
               const base64Data = reader.result as string;
               
-              // 上传图片
-              const apiBaseUrl = 'http://localhost:3001';
-              
-              const response = await fetch(`${apiBaseUrl}/api/images/upload`, {
-                method: 'POST',
-                headers: {
-                  'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
+              let imagePath = '';
+              if (tauriEnv) {
+                const result = await tauriClient.images.upload({
                   imageData: base64Data,
                   promptId: prompt.meta.id,
-                }),
-              });
-              
-              if (!response.ok) {
-                throw new Error('图片上传失败');
+                }) as { success: boolean; data?: { path?: string }; error?: string };
+                if (!result.success || !result.data?.path) {
+                  throw new Error(result.error || '图片上传失败');
+                }
+                imagePath = result.data.path;
+              } else {
+                const apiBaseUrl = 'http://localhost:3001';
+                const response = await fetch(`${apiBaseUrl}/api/images/upload`, {
+                  method: 'POST',
+                  headers: {
+                    'Content-Type': 'application/json',
+                  },
+                  body: JSON.stringify({
+                    imageData: base64Data,
+                    promptId: prompt.meta.id,
+                  }),
+                });
+                if (!response.ok) {
+                  throw new Error('图片上传失败');
+                }
+                const result = await response.json();
+                imagePath = result.path;
               }
-              
-              const result = await response.json();
               
               // 使用引用式链接：找到下一个可用的引用编号
               const existingRefs = newContent.match(/\[(\d+)\]:/g) || [];
@@ -538,7 +564,7 @@ export function EditorOverlay({ promptId, originCardId, onClose, promptIds, onNa
               const imageMd = `![图片][${refNum}]`;
               
               // 在文档末尾添加引用定义
-              const refDefinition = `\n[${refNum}]: ${result.path}`;
+              const refDefinition = `\n[${refNum}]: ${imagePath}`;
               const contentWithoutPlaceholder = newContent.replace(placeholder, imageMd);
               const finalContent = contentWithoutPlaceholder + refDefinition;
               
@@ -553,7 +579,7 @@ export function EditorOverlay({ promptId, originCardId, onClose, promptIds, onNa
                 }
               });
               
-              showToast('图片上传成功', 'success');
+              notifyMessage('图片上传成功');
               
             } catch (error) {
               console.error('图片上传失败:', error);
@@ -771,7 +797,7 @@ export function EditorOverlay({ promptId, originCardId, onClose, promptIds, onNa
         };
         await savePrompt(updated);
         triggerAction('update');
-        showToast("已保存更改", 'success');
+        notifyMessage("已保存更改");
       } catch (error) {
         showToast("保存失败", 'error');
       }
@@ -1121,7 +1147,7 @@ export function EditorOverlay({ promptId, originCardId, onClose, promptIds, onNa
     try {
       await savePrompt(updated);
       triggerAction('favorite');
-      showToast("已保存更改", 'success');
+      notifyMessage("已保存更改");
     } catch (error) {
       showToast("操作失败", 'error');
     }
@@ -1131,8 +1157,8 @@ export function EditorOverlay({ promptId, originCardId, onClose, promptIds, onNa
   const handleDelete = async () => {
     try {
       await deletePrompt(promptId, false);
+      notifyMessage("已移动到回收站，可从回收站恢复");
       triggerAction('delete');
-      showToast("已移动到回收站，可从回收站恢复", 'success');
       onClose();
     } catch (error) {
       showToast("删除失败", 'error');
@@ -1143,7 +1169,7 @@ export function EditorOverlay({ promptId, originCardId, onClose, promptIds, onNa
   const handleCopy = () => {
     navigator.clipboard.writeText(content)
       .then(() => {
-        showToast("已复制到剪贴板", 'success');
+        notifyMessage("已复制到剪贴板");
         triggerAction('clipboard');
       })
       .catch(() => showToast("复制失败", 'error'));
@@ -1543,7 +1569,7 @@ export function EditorOverlay({ promptId, originCardId, onClose, promptIds, onNa
                             setTags(nextTags); // 标签栏同步更新
                             
                             const message = newCategoryName ? `已移动到"${newCategoryName}"分类` : '已移动到根目录（无分类）';
-                            showToast(message, 'success');
+                            notifyMessage(message);
                           } catch (error) {
                             showToast(`更新失败: ${(error as Error).message}`, 'error');
                           }
@@ -1909,7 +1935,9 @@ export function EditorOverlay({ promptId, originCardId, onClose, promptIds, onNa
                             const promptId = parts[1];
                             const fileName = parts.slice(2).join('/');
                             const apiBaseUrl = 'http://localhost:3001';
-                            const imageUrl = `${apiBaseUrl}/api/images/${promptId}/${fileName}`;
+                            const imageUrl = tauriEnv && vaultRoot
+                              ? convertFileSrc(joinVaultPath(vaultRoot, imagePath))
+                              : `${apiBaseUrl}/api/images/${promptId}/${fileName}`;
                             
                             return (
                               <div

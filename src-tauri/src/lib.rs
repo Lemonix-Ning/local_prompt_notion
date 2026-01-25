@@ -10,6 +10,30 @@ mod scheduler;
 use scheduler::commands::{acknowledge_task, get_pending_tasks, set_window_visibility};
 use scheduler::{start_scheduler, stop_scheduler};
 use scheduler::SchedulerState;
+mod fs_api;
+mod perf;
+mod syscheck;
+use fs_api::{
+    VaultState,
+    get_vault_root,
+    scan_vault,
+    read_prompt,
+    save_prompt,
+    create_prompt,
+    delete_prompt,
+    restore_prompt,
+    create_category,
+    rename_category,
+    move_category,
+    delete_category,
+    import_prompts,
+    export_prompts,
+    trash_visit,
+    trash_status,
+    upload_image,
+};
+use perf::save_performance_snapshot;
+use syscheck::verify_single_process;
 
 struct CloseBehaviorState(Mutex<String>);
 
@@ -160,7 +184,25 @@ pub fn run() {
       get_close_behavior,
       get_pending_tasks,
       acknowledge_task,
-      set_window_visibility
+      set_window_visibility,
+      get_vault_root,
+      scan_vault,
+      read_prompt,
+      save_prompt,
+      create_prompt,
+      delete_prompt,
+      restore_prompt,
+      create_category,
+      rename_category,
+      move_category,
+      delete_category,
+      import_prompts,
+      export_prompts,
+      trash_visit,
+      trash_status,
+      upload_image,
+      save_performance_snapshot
+      ,verify_single_process
     ])
     .setup(move |app| {
       // 🚀 优化：减少启动日志，加快启动速度
@@ -177,6 +219,13 @@ pub fn run() {
           ));
       }
 
+      // 🔥 临时：在生产模式下也打开开发者工具用于调试
+      #[cfg(debug_assertions)]
+      if let Some(window) = app.get_webview_window("main") {
+        let _ = window.open_devtools();
+        println!("DevTools opened for debugging");
+      }
+
       let vault_root = resolve_vault_root(app.handle());
 
       // 默认关闭行为：最小化到托盘
@@ -190,6 +239,7 @@ pub fn run() {
         eprintln!("Failed to ensure vault seed data: {}", err);
       }
 
+      app.manage(VaultState(vault_root.clone()));
       let scheduler_state = SchedulerState::new(vault_root.clone());
       let scheduler_state_clone = scheduler_state.clone();
       app.manage(scheduler_state);
@@ -197,6 +247,7 @@ pub fn run() {
       tauri::async_runtime::spawn(async move {
         let _ = start_scheduler(scheduler_state_clone, app_handle).await;
       });
+      let _ = verify_single_process(app.handle().clone());
 
       // 创建系统托盘菜单
       let show_item = MenuItem::with_id(app, "show", "显示窗口", true, None::<&str>)?;

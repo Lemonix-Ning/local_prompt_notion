@@ -2,6 +2,7 @@ use chrono::{DateTime, Duration, Utc};
 
 use super::TaskMetadata;
 
+#[allow(dead_code)]
 pub fn check_due_tasks(tasks: &[TaskMetadata], current_time: DateTime<Utc>) -> Vec<TaskMetadata> {
     tasks
         .iter()
@@ -10,11 +11,13 @@ pub fn check_due_tasks(tasks: &[TaskMetadata], current_time: DateTime<Utc>) -> V
         .collect()
 }
 
+#[allow(dead_code)]
 pub fn is_task_due(task: &TaskMetadata, current_time: DateTime<Utc>) -> bool {
     let due_time = calculate_due_time(task.last_notified, task.interval_minutes);
     current_time >= due_time
 }
 
+#[allow(dead_code)]
 pub fn calculate_due_time(last_notified: Option<DateTime<Utc>>, interval_minutes: i64) -> DateTime<Utc> {
     match last_notified {
         Some(value) => value + Duration::minutes(interval_minutes),
@@ -22,6 +25,7 @@ pub fn calculate_due_time(last_notified: Option<DateTime<Utc>>, interval_minutes
     }
 }
 
+#[allow(dead_code)]
 pub fn update_last_notified_if_due(task: &mut TaskMetadata, current_time: DateTime<Utc>) -> bool {
     if is_task_due(task, current_time) {
         task.last_notified = Some(current_time);

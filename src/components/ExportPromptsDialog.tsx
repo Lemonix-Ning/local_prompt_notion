@@ -9,6 +9,8 @@ import { useApp } from '../AppContext';
 import { useToast } from '../contexts/ToastContext';
 import { useLumi } from '../contexts/LumiContext';
 import api from '../api/client';
+import { tauriClient } from '../api/tauriClient';
+import { isTauriEnv } from '../utils/tauriEnv';
 import { NewPromptOverlay } from './NewPromptOverlay';
 
 interface ExportPromptsDialogProps {
@@ -36,7 +38,7 @@ export const ExportPromptsDialog: React.FC<ExportPromptsDialogProps> = ({
 }) => {
   const { state } = useApp();
   const { showToast } = useToast();
-  const { triggerTransfer } = useLumi();
+  const { triggerTransfer, notifyMessage } = useLumi();
 
   // 🔥 所有 useState 必须在顶层调用
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -341,7 +343,8 @@ export const ExportPromptsDialog: React.FC<ExportPromptsDialogProps> = ({
     triggerTransfer('exporting');
 
     try {
-      const response = await api.prompts.export({
+      const client = isTauriEnv() ? tauriClient : api;
+      const response = await client.prompts.export({
         structuredIds: Array.from(categorySelectedIds), // 通过分类选择器选中的 → 保留结构
         flatIds: manualSelectedIds, // 手动选择的 → 扁平结构
         includeContent,
@@ -366,7 +369,7 @@ export const ExportPromptsDialog: React.FC<ExportPromptsDialogProps> = ({
         if (notFound && notFound.length > 0) {
           showToast(`导出完成: ${total} 个成功, ${notFound.length} 个未找到`, 'warning');
         } else {
-          showToast(`成功导出 ${total} 个提示词`, 'success');
+          notifyMessage(`成功导出 ${total} 个提示词`);
         }
 
         onClose();

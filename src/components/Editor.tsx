@@ -17,10 +17,12 @@ import {
 import { useApp } from '../AppContext';
 import { PromptData } from '../types';
 import { useToast } from '../contexts/ToastContext';
+import { useLumi } from '../contexts/LumiContext';
 
 export function Editor() {
   const { state, dispatch, getCurrentPrompt, savePrompt, deletePrompt } = useApp();
   const { showToast } = useToast();
+  const { notifyMessage } = useLumi();
   const { isEditing } = state;
 
   const currentPrompt = getCurrentPrompt();
@@ -71,7 +73,7 @@ export function Editor() {
     try {
       await savePrompt(formData);
       dispatch({ type: 'SET_EDITING', payload: false });
-      showToast('保存成功!', 'success');
+      notifyMessage('保存成功!');
     } catch (error) {
       showToast('保存失败: ' + (error as Error).message, 'error');
     }
@@ -80,7 +82,7 @@ export function Editor() {
   const handleDelete = async () => {
     try {
       await deletePrompt(formData.meta.id);
-      showToast('已移动到回收站，可从回收站恢复', 'success');
+      notifyMessage('已移动到回收站，可从回收站恢复');
     } catch (error) {
       showToast('删除失败: ' + (error as Error).message, 'error');
     }
@@ -88,7 +90,7 @@ export function Editor() {
 
   const handleCopy = () => {
     navigator.clipboard.writeText(formData.content);
-    showToast('已复制到剪贴板!', 'success');
+    notifyMessage('已复制到剪贴板!');
   };
 
   const handleToggleFavorite = () => {

@@ -321,7 +321,12 @@ export class FileSystemAdapter implements IFileSystemAdapter {
    * 删除分类
    */
   async deleteCategory(categoryPath: string): Promise<void> {
-    await fs.rm(categoryPath, { recursive: true, force: true });
+    const rootPath = this.getRootPath(categoryPath);
+    const trashPath = path.join(rootPath, 'trash');
+    await fs.mkdir(trashPath, { recursive: true });
+    const categoryName = path.basename(categoryPath);
+    const targetPath = path.join(trashPath, `${categoryName}_${Date.now()}`);
+    await fs.rename(categoryPath, targetPath);
   }
 
   /**

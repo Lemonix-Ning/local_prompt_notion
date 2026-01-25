@@ -19,12 +19,14 @@
 import { memo, useRef, useEffect } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import rehypeHighlight from 'rehype-highlight';
 import rehypeRaw from 'rehype-raw';
 import { Copy, Check } from 'lucide-react';
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useMemo } from 'react';
 import { LazyLoadManager } from '../utils/lazyLoad';
-import hljs from 'highlight.js';
+import hljs from 'highlight.js/lib/common';
+import { tauriClient } from '../api/tauriClient';
+import { isTauriEnv } from '../utils/tauriEnv';
+import { convertFileSrc } from '@tauri-apps/api/core';
 
 // 导入 highlight.js 样式（在 index.css 中会覆盖）
 import 'highlight.js/styles/github-dark.css';
@@ -62,6 +64,17 @@ function CodeBlock({
   };
   
   const codeText = extractText(children);
+  const highlighted = useMemo(() => {
+    if (!codeText) return '';
+    try {
+      if (language) {
+        return hljs.highlight(codeText, { language }).value;
+      }
+      return hljs.highlightAuto(codeText).value;
+    } catch {
+      return codeText;
+    }
+  }, [codeText, language]);
   
   const handleCopy = useCallback(async () => {
     try {
@@ -172,17 +185,16 @@ function CodeBlock({
           boxSizing: 'border-box', // 🔥 包含 padding 在宽度内
         }}
       >
-        <code 
-          className={className} 
-          style={{ 
+        <code
+          className={className}
+          style={{
             fontFamily: 'ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace',
-            whiteSpace: 'pre', // 🔥 保留空白字符和换行，不自动换行
-            display: 'inline-block', // 🔥 改为 inline-block 以支持水平滚动
-            minWidth: '100%', // 🔥 最小宽度为容器宽度
+            whiteSpace: 'pre',
+            display: 'inline-block',
+            minWidth: '100%',
           }}
-        >
-          {children}
-        </code>
+          dangerouslySetInnerHTML={{ __html: highlighted || codeText }}
+        />
       </pre>
     </div>
   );
@@ -192,6 +204,7 @@ function CodeBlock({
 function LazyImage({ src, alt }: { src?: string; alt?: string }) {
   const [isLoaded, setIsLoaded] = useState(false);
   const [isVisible, setIsVisible] = useState(false);
+  const [resolvedSrc, setResolvedSrc] = useState<string | undefined>(undefined);
   const imgRef = useRef<HTMLImageElement>(null);
   const managerRef = useRef<LazyLoadManager | null>(null);
 
@@ -213,32 +226,42 @@ function LazyImage({ src, alt }: { src?: string; alt?: string }) {
     };
   }, [src]);
 
-  // 🔥 处理本地图片路径
-  const getImageSrc = () => {
-    if (!src) return undefined;
-    
-    // 如果是 assets/ 开头的相对路径，转换为 API 路径
-    if (src.startsWith('assets/')) {
-      const apiBaseUrl = 'http://localhost:3001';
-      
-      // 提取 promptId 和 fileName
-      // 格式: assets/promptId/fileName
-      const parts = src.split('/');
-      if (parts.length >= 3) {
-        const promptId = parts[1];
-        const fileName = parts.slice(2).join('/');
-        return `${apiBaseUrl}/api/images/${promptId}/${fileName}`;
-      }
+  useEffect(() => {
+    if (!src) {
+      setResolvedSrc(undefined);
+      return;
     }
-    
-    // 其他情况直接返回原始 src
-    return src;
-  };
+    if (!src.startsWith('assets/')) {
+      setResolvedSrc(src);
+      return;
+    }
+    if (isTauriEnv()) {
+      tauriClient.vault.root().then(root => {
+        const separator = root.includes('\\') ? '\\' : '/';
+        const cleanedRoot = root.replace(/[\\/]+$/, '');
+        const cleanedRel = src.replace(/^\/+/, '').replace(/\//g, separator);
+        const filePath = `${cleanedRoot}${separator}${cleanedRel}`;
+        setResolvedSrc(convertFileSrc(filePath));
+      }).catch(() => {
+        setResolvedSrc(src);
+      });
+      return;
+    }
+    const apiBaseUrl = 'http://localhost:3001';
+    const parts = src.split('/');
+    if (parts.length >= 3) {
+      const promptId = parts[1];
+      const fileName = parts.slice(2).join('/');
+      setResolvedSrc(`${apiBaseUrl}/api/images/${promptId}/${fileName}`);
+      return;
+    }
+    setResolvedSrc(src);
+  }, [src]);
 
   return (
     <img
       ref={imgRef}
-      src={isVisible ? getImageSrc() : undefined}
+      src={isVisible ? resolvedSrc : undefined}
       alt={alt || ''}
       onLoad={() => setIsLoaded(true)}
       style={{
@@ -328,13 +351,7 @@ const MarkdownRendererComponent = ({ content, theme, className }: MarkdownRender
     >
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
-        rehypePlugins={[
-          rehypeRaw, // 🔥 解析 HTML
-          [rehypeHighlight, { 
-            ignoreMissing: true,
-            subset: false,
-          }],
-        ]}
+        rehypePlugins={[rehypeRaw]}
         components={{
           // 标题
           h1: ({ children }) => (

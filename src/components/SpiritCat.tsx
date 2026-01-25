@@ -10,7 +10,7 @@ type SpiritMode =
   | 'windy'
   | 'dragging'
   | 'chat'
-  | 'countdown'
+  | 'alarm'
   | 'schedule'
   | 'importing'
   | 'exporting'
@@ -44,14 +44,16 @@ export function SpiritCat({
       mode === 'sleep' ||
       mode === 'delete' ||
       mode === 'search' ||
-      mode === 'countdown' ||
       mode === 'dragging' ||
       mode === 'pin' ||
       mode === 'update' ||
       mode === 'clipboard' ||
       mode === 'rename' ||
       mode === 'create_card' ||
-      mode === 'create_folder'
+      mode === 'create_folder' ||
+      mode === 'importing' ||
+      mode === 'exporting' ||
+      mode === 'alarm'
     ) {
       setInternalBlink(false);
       return;
@@ -69,7 +71,7 @@ export function SpiritCat({
     body: theme === 'dark' ? '#E2E8F0' : '#334155',
     stroke: theme === 'dark' ? '#94A3B8' : '#1E293B',
     paw: theme === 'dark' ? '#E2E8F0' : '#334155',
-    eyeNormal: theme === 'dark' ? '#FBBF24' : '#F59E0B',
+    eyeNormal: '#3B82F6',
     eyeSleep: theme === 'dark' ? '#94A3B8' : '#475569',
     eyeSearch: '#10B981',
     eyeCreate: '#22D3EE',
@@ -79,11 +81,11 @@ export function SpiritCat({
     eyeLove: '#EC4899',
     eyePin: '#F59E0B',
     eyeRename: '#A855F7',
-    eyeThinking: '#22D3EE',
+    eyeThinking: theme === 'dark' ? '#A78BFA' : '#8B5CF6', // 思考紫
     eyeImport: '#22C55E',
     eyeExport: '#3B82F6',
-    eyeCountdown: '#F97316',
-    eyeSchedule: '#60A5FA',
+    eyeAlarm: '#EF4444',
+    eyeSchedule: '#3B82F6',
     eyeSuccess: '#10B981',
   };
 
@@ -99,19 +101,24 @@ export function SpiritCat({
   if (mode === 'rename') eyeColor = colors.eyeRename;
   if (mode === 'importing') eyeColor = colors.eyeImport;
   if (mode === 'exporting') eyeColor = colors.eyeExport;
-  if (mode === 'countdown') eyeColor = colors.eyeCountdown;
+  if (mode === 'alarm') eyeColor = colors.eyeAlarm;
   if (mode === 'schedule') eyeColor = colors.eyeSchedule;
   if (mode === 'update' || mode === 'clipboard') eyeColor = colors.eyeSuccess;
-  const isThinkingIdle = isThinking && (mode === 'idle' || mode === 'chat');
-  if (isThinkingIdle) eyeColor = colors.eyeThinking;
+  const isThinkingActive = isThinking && (mode === 'idle' || mode === 'chat');
+  const isThinkingIdle = isThinking && mode === 'idle'; // Thinking 模式且在 idle 状态
+  if (isThinkingActive) eyeColor = colors.eyeThinking;
 
   const bodyAnimation =
     mode === 'sleep'
-      ? { scaleY: 0.95 }
+      ? { 
+          scale: [1, 1.03, 1], // 呼吸效果：缓慢放大缩小
+        }
                     : mode === 'windy'
                     ? { y: 4, scaleY: 0.95 }
         : mode === 'dragging'
           ? { y: 6 }
+          : mode === 'chat'
+            ? { y: [0, -6, 0] }
           : mode === 'create_card'
             ? { y: [0, -15, 0], scale: [1, 1.1, 1] }
             : mode === 'create_folder'
@@ -119,27 +126,27 @@ export function SpiritCat({
                 : mode === 'update'
                   ? { y: [0, 6, 0], scaleY: [1, 0.92, 1] }
                   : mode === 'clipboard'
-                    ? { y: [0, 8, 0] }
+                    ? { scale: [1, 1.15, 1], rotate: [0, 5, -5, 0] }
                     : mode === 'delete'
                       ? { rotate: [0, -5, 5, -5, 5, 0] }
-                  : mode === 'restore'
+                  : mode === 'alarm'
+                    ? { x: [-3, 3, -3, 3, 0], scale: 1.1 }
+                    : mode === 'restore'
                     ? { y: -15, rotate: [0, -2, 2, 0] }
                     : mode === 'favorite'
                       ? { scaleX: 0.9, scaleY: 1.05, y: -5 }
                       : mode === 'pin'
                         ? { y: -20, scaleY: 1.15, scaleX: 0.9 }
                         : mode === 'importing'
-                          ? { scaleY: [1, 1.1, 0.85, 1], scaleX: [1, 0.9, 1.1, 1] }
+                          ? { scaleY: [1, 1.1, 0.85, 1], scaleX: [1, 0.9, 1.1, 1], y: [0, 6, 0] }
                           : mode === 'exporting'
                             ? { scaleY: [1, 0.8, 1.2, 1], scaleX: [1, 1.2, 0.8, 1], y: [0, 5, -20, 0] }
-                            : mode === 'countdown'
-                              ? { x: [-2, 2, -2, 2, 0], scale: [1, 1.05, 1] }
-                              : mode === 'schedule'
-                                ? { y: [0, -10, 0], scaleY: [1, 1.05, 0.95, 1] }
-                                : mode === 'rename'
-                                  ? { x: [-2, 2, -2, 2, 0], scale: [1, 1.02, 1] }
-        : mode === 'chat'
-          ? { y: [0, -6, 0] }
+                            : mode === 'schedule'
+                              ? { y: [0, -10, 0], scaleY: [1, 1.05, 0.95, 1] }
+                              : mode === 'rename'
+                                ? { x: [-2, 2, -2, 2, 0], scale: [1, 1.02, 1] }
+        : isThinkingActive
+          ? { y: -10, scale: [1, 1.05, 1] }
         : orientation !== 'bottom'
           ? { y: [-4, 4, -4] }
           : { scaleY: [1, 0.985, 1] };
@@ -147,40 +154,70 @@ export function SpiritCat({
   const bodyTransition = {
     default: { duration: 0.3 },
     y: {
-      duration: mode === 'chat' ? 0.3 : mode === 'idle' || mode === 'restore' ? 3 : 0.3,
-      repeat: mode === 'chat' ? 2 : mode === 'idle' || mode === 'restore' ? Infinity : 0,
+      duration: isThinkingActive ? 0.5 : mode === 'idle' || mode === 'restore' ? 3 : 0.3,
+      repeat: isThinkingActive ? 0 : mode === 'idle' || mode === 'restore' ? Infinity : 0,
       ease: [0.42, 0, 0.58, 1] as [number, number, number, number],
     },
+    rotate: {
+      duration: 0.3,
+      repeat: 0,
+      ease: [0.42, 0, 0.58, 1] as [number, number, number, number],
+    },
+    scale: {
+      duration: mode === 'sleep' ? 3.5 : isThinkingActive ? 1 : 0.3, // 睡眠时呼吸缓慢
+      repeat: mode === 'sleep' ? Infinity : isThinkingActive ? Infinity : 0, // 睡眠时持续呼吸
+      ease: mode === 'sleep' ? 'easeInOut' as const : isThinkingActive ? 'easeInOut' as const : [0.42, 0, 0.58, 1] as [number, number, number, number],
+    },
     x: {
-      duration: mode === 'countdown' ? 0.1 : mode === 'rename' ? 0.4 : 0.3,
-      repeat: mode === 'countdown' ? Infinity : 0,
+      duration: mode === 'alarm' ? 0.1 : mode === 'rename' ? 0.4 : 0.3,
+      repeat: mode === 'alarm' ? 5 : 0,
       ease: [0.42, 0, 0.58, 1] as [number, number, number, number],
     },
   };
 
   const eyeRy = isWindy ? 2 : isSleeping || isBlinking ? 0.5 : mode === 'dragging' ? 10 : 8;
   const eyeBaseCy =
-    mode === 'pin' ? 40 : mode === 'importing' ? 55 : mode === 'exporting' ? 45 : 50;
+    mode === 'pin' ? 40 : mode === 'exporting' ? 40 : mode === 'importing' ? 58 : 50;
   const eyeHighlightCy =
-    mode === 'pin' ? 36 : mode === 'importing' ? 51 : mode === 'exporting' ? 41 : 46;
+    mode === 'pin' ? 36 : mode === 'exporting' ? 36 : mode === 'importing' ? 54 : 46;
+  const safeEyeRy = Number.isFinite(eyeRy) ? eyeRy : 8;
+  const safeEyeBaseCy = Number.isFinite(eyeBaseCy) ? eyeBaseCy : 50;
+  const safeEyeHighlightCy = Number.isFinite(eyeHighlightCy) ? eyeHighlightCy : 46;
   const idleBodyPath = 'M 50 20 C 75 20 85 40 85 60 C 85 85 70 95 50 95 C 30 95 15 85 15 60 C 15 40 25 20 50 20 Z';
   const thinkingBodyPath = 'M 50 15 C 80 15 90 35 90 60 C 90 90 70 90 50 95 C 30 90 10 90 10 60 C 10 35 20 15 50 15 Z';
   const outerRingRotation = mode === 'restore' ? -360 : 360;
   const outerRingDuration =
     mode === 'delete'
       ? 4
-      : mode === 'countdown'
-        ? 4
+      : mode === 'alarm'
+        ? 1
         : mode === 'favorite'
           ? 12
           : mode === 'update'
             ? 0.6
-            : isThinkingIdle
-              ? 6
-              : 10;
+            : mode === 'importing'
+              ? 3
+              : mode === 'exporting'
+                ? 3
+                : isThinkingActive
+                  ? 1
+                  : 10;
   const outerRingRepeat = mode === 'update' ? 0 : Infinity;
-  const outerRingScale = mode === 'rename' ? [1, 1.08, 1] : mode !== 'idle' && mode !== 'sleep' ? 1.2 : 1;
-  const innerRingDuration = isThinkingIdle ? 8 : 15;
+  const outerRingScale =
+    mode === 'rename'
+      ? [1, 1.08, 1]
+      : isThinkingActive
+        ? [1, 1.1, 1]
+        : mode !== 'idle' && mode !== 'sleep'
+          ? 1.2
+          : 1;
+  const innerRingDuration = isThinkingActive ? 1.2 : 15;
+  const isIdleMode = mode === 'idle';
+  const isChatMode = mode === 'chat';
+  const isSleepMode = mode === 'sleep';
+  const ringsVisible = (!isIdleMode && !isChatMode && !isSleepMode) || isThinkingActive;
+  const outerRingOpacity = ringsVisible ? (isThinkingActive ? [0.35, 0.85, 0.35] : 0.8) : 0;
+  const innerRingOpacity = ringsVisible ? (isThinkingActive ? [0.2, 0.6, 0.2] : 0.6) : 0;
 
   return (
     <motion.div
@@ -190,7 +227,7 @@ export function SpiritCat({
         bottom: { rotate: 0 },
         left: { rotate: 0 },
         right: { rotate: 0 },
-        top: { rotate: 0 },
+        top: { rotate: 180, scaleX: -1 }, // 顶部：翻转身体，头朝下
       }}
       transition={{ type: 'spring', stiffness: 200, damping: 20 }}
     >
@@ -199,20 +236,25 @@ export function SpiritCat({
           className={`absolute inset-0 rounded-full border-2 border-dashed ${theme === 'dark' ? 'border-indigo-400/50' : 'border-cyan-400/30'}`}
           animate={{
             rotate: outerRingRotation,
-            scale: outerRingScale,
-            opacity: mode === 'sleep' ? 0 : mode !== 'idle' ? 0.8 : 0.2,
-            borderColor: mode !== 'idle' ? eyeColor : undefined,
+              scale: outerRingScale,
+            opacity: outerRingOpacity,
+            borderColor: ringsVisible ? eyeColor : undefined,
           }}
+          style={{ borderWidth: 2 }}
           transition={{
             rotate: { duration: outerRingDuration, repeat: outerRingRepeat, ease: 'linear' },
-            scale: { duration: 0.6, repeat: mode === 'rename' ? Infinity : 0, ease: 'easeInOut' },
+            scale: { 
+              duration: isThinkingActive ? 1 : 0.6, 
+              repeat: mode === 'rename' ? Infinity : 0, 
+              ease: 'easeInOut' 
+            },
           }}
         />
         <motion.div
           className={`absolute inset-2 rounded-full border ${theme === 'dark' ? 'border-indigo-400/30' : 'border-cyan-400/20'}`}
           animate={{
             rotate: -360,
-            opacity: mode === 'sleep' ? 0 : mode !== 'idle' ? 0.6 : 0.15,
+            opacity: innerRingOpacity,
           }}
           transition={{ rotate: { duration: innerRingDuration, repeat: Infinity, ease: 'linear' } }}
         />
@@ -284,8 +326,25 @@ export function SpiritCat({
               )}
               {(mode === 'update' || mode === 'clipboard') && (
                 <g stroke={eyeColor} strokeWidth="3" strokeLinecap="round" fill="none">
-                  <path d="M 28 50 L 33 55 L 42 45" />
-                  <path d="M 58 50 L 63 55 L 72 45" />
+                  {mode === 'clipboard' ? (
+                    <>
+                      <path d="M 28 52 Q 35 45 42 52" />
+                      <path d="M 58 52 Q 65 45 72 52" />
+                    </>
+                  ) : (
+                    <>
+                      <path d="M 28 50 L 33 55 L 42 45" />
+                      <path d="M 58 50 L 63 55 L 72 45" />
+                    </>
+                  )}
+                </g>
+              )}
+              {mode === 'alarm' && (
+                <g stroke={eyeColor} strokeWidth="2" fill="none">
+                  <circle cx="35" cy="50" r="8" />
+                  <circle cx="35" cy="50" r="3" fill={eyeColor} />
+                  <circle cx="65" cy="50" r="8" />
+                  <circle cx="65" cy="50" r="3" fill={eyeColor} />
                 </g>
               )}
               {mode === 'delete' && (
@@ -330,12 +389,12 @@ export function SpiritCat({
                   <path d="M 61 56 H 65" />
                 </g>
               )}
-              {mode === 'countdown' && (
+              {mode === 'alarm' && (
                 <g stroke={eyeColor} strokeWidth="2" fill="none">
-                  <circle cx="35" cy="50" r="7" />
-                  <circle cx="35" cy="50" r="3" />
-                  <circle cx="65" cy="50" r="7" />
-                  <circle cx="65" cy="50" r="3" />
+                  <circle cx="35" cy="50" r="8" />
+                  <circle cx="35" cy="50" r="3" fill={eyeColor} />
+                  <circle cx="65" cy="50" r="8" />
+                  <circle cx="65" cy="50" r="3" fill={eyeColor} />
                 </g>
               )}
               {mode === 'schedule' && (
@@ -357,6 +416,24 @@ export function SpiritCat({
                   <path d="M 76 50 L 85 45" />
                 </g>
               )}
+              {isThinkingActive && (
+                <>
+                  <motion.g
+                    animate={{ rotate: 360 }}
+                    transition={{ duration: 1, repeat: Infinity, ease: 'linear' }}
+                    style={{ transformOrigin: '35px 50px' }}
+                  >
+                    <circle cx="35" cy="50" r="8" stroke={eyeColor} strokeWidth="2.5" fill="none" strokeDasharray="30 20" />
+                  </motion.g>
+                  <motion.g
+                    animate={{ rotate: 360 }}
+                    transition={{ duration: 1, repeat: Infinity, ease: 'linear' }}
+                    style={{ transformOrigin: '65px 50px' }}
+                  >
+                    <circle cx="65" cy="50" r="8" stroke={eyeColor} strokeWidth="2.5" fill="none" strokeDasharray="30 20" />
+                  </motion.g>
+                </>
+              )}
               {mode !== 'create_card' &&
                 mode !== 'create_folder' &&
                 mode !== 'update' &&
@@ -365,15 +442,16 @@ export function SpiritCat({
                 mode !== 'restore' &&
                 mode !== 'favorite' &&
                 mode !== 'rename' &&
-                mode !== 'countdown' &&
+                mode !== 'alarm' &&
                 mode !== 'schedule' &&
-                mode !== 'search' && (
+                mode !== 'search' &&
+                !isThinkingActive && (
                   <>
                     <motion.ellipse
                       cx="35"
                       cy="50"
                       rx="6"
-                      animate={{ ry: eyeRy, cy: eyeBaseCy }}
+                      animate={{ ry: safeEyeRy, cy: safeEyeBaseCy }}
                       fill={eyeColor}
                       style={mode === 'idle' ? { x: pupilX ?? 0, y: pupilY ?? 0 } : {}}
                     />
@@ -383,14 +461,14 @@ export function SpiritCat({
                       r="2"
                       fill="white"
                       opacity="0.8"
-                      animate={{ opacity: mode === 'sleep' ? 0 : 0.8, cy: eyeHighlightCy }}
+                      animate={{ opacity: mode === 'sleep' ? 0 : 0.8, cy: safeEyeHighlightCy }}
                       style={mode === 'idle' ? { x: pupilX ?? 0, y: pupilY ?? 0 } : {}}
                     />
                     <motion.ellipse
                       cx="65"
                       cy="50"
                       rx="6"
-                      animate={{ ry: eyeRy, cy: eyeBaseCy }}
+                      animate={{ ry: safeEyeRy, cy: safeEyeBaseCy }}
                       fill={eyeColor}
                       style={mode === 'idle' ? { x: pupilX ?? 0, y: pupilY ?? 0 } : {}}
                     />
@@ -400,7 +478,7 @@ export function SpiritCat({
                       r="2"
                       fill="white"
                       opacity="0.8"
-                      animate={{ opacity: mode === 'sleep' ? 0 : 0.8, cy: eyeHighlightCy }}
+                      animate={{ opacity: mode === 'sleep' ? 0 : 0.8, cy: safeEyeHighlightCy }}
                       style={mode === 'idle' ? { x: pupilX ?? 0, y: pupilY ?? 0 } : {}}
                     />
                   </>
@@ -425,6 +503,86 @@ export function SpiritCat({
                 transition={{ duration: 0.3 }}
               />
             </g>
+            
+            {/* ZZZ 睡眠动画 */}
+            <AnimatePresence>
+              {mode === 'sleep' && (
+                <motion.g>
+                  {/* 第一个 Z - 最小最近 */}
+                  <motion.text
+                    x="50"
+                    y="20"
+                    fontSize="12"
+                    fontWeight="bold"
+                    fill={theme === 'dark' ? '#94A3B8' : '#64748B'}
+                    textAnchor="middle"
+                    initial={{ opacity: 0, y: 25, scale: 0.6 }}
+                    animate={{
+                      opacity: [0, 1, 1, 0],
+                      y: [25, 20, 15, 10],
+                      scale: [0.6, 0.8, 1, 1.2],
+                    }}
+                    transition={{
+                      duration: 2.5,
+                      repeat: Infinity,
+                      ease: 'easeOut',
+                      delay: 0,
+                    }}
+                  >
+                    Z
+                  </motion.text>
+                  
+                  {/* 第二个 Z - 中等 */}
+                  <motion.text
+                    x="60"
+                    y="15"
+                    fontSize="16"
+                    fontWeight="bold"
+                    fill={theme === 'dark' ? '#94A3B8' : '#64748B'}
+                    textAnchor="middle"
+                    initial={{ opacity: 0, y: 20, scale: 0.7 }}
+                    animate={{
+                      opacity: [0, 1, 1, 0],
+                      y: [20, 15, 10, 5],
+                      scale: [0.7, 0.9, 1.1, 1.3],
+                    }}
+                    transition={{
+                      duration: 2.5,
+                      repeat: Infinity,
+                      ease: 'easeOut',
+                      delay: 0.6,
+                    }}
+                  >
+                    Z
+                  </motion.text>
+                  
+                  {/* 第三个 Z - 最大最远 */}
+                  <motion.text
+                    x="70"
+                    y="10"
+                    fontSize="20"
+                    fontWeight="bold"
+                    fill={theme === 'dark' ? '#94A3B8' : '#64748B'}
+                    textAnchor="middle"
+                    initial={{ opacity: 0, y: 15, scale: 0.8 }}
+                    animate={{
+                      opacity: [0, 1, 1, 0],
+                      y: [15, 10, 5, 0],
+                      scale: [0.8, 1, 1.2, 1.4],
+                    }}
+                    transition={{
+                      duration: 2.5,
+                      repeat: Infinity,
+                      ease: 'easeOut',
+                      delay: 1.2,
+                    }}
+                  >
+                    Z
+                  </motion.text>
+                </motion.g>
+              )}
+            </AnimatePresence>
+            
             <AnimatePresence>
               {orientation !== 'bottom' && (
                 <motion.g initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
@@ -446,9 +604,9 @@ export function SpiritCat({
                   />
                   <motion.ellipse
                     animate={{
-                      cx: mode === 'favorite' ? 55 : 60,
-                      cy: mode === 'pin' ? 65 : mode === 'dragging' ? 90 : 85,
-                      rotate: mode === 'favorite' ? 15 : 0,
+                      cx: mode === 'favorite' ? 55 : (isThinkingIdle ? 62 : 60),
+                      cy: mode === 'pin' ? 65 : (isThinkingIdle ? 65 : mode === 'dragging' ? 90 : 85),
+                      rotate: mode === 'favorite' ? 15 : (isThinkingIdle ? -20 : 0),
                     }}
                     rx="5"
                     ry="4"

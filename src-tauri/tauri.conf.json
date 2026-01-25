@@ -26,7 +26,8 @@
         "dragDropEnabled": false,
         "visibleOnAllWorkspaces": true,
         "contentProtected": false,
-        "visible": true
+        "visible": true,
+        "devtools": true
       }
     ],
     "security": {
@@ -38,7 +39,7 @@
   },
   "bundle": {
     "active": true,
-    "targets": "all",
+    "targets": "nsis",
     "resources": [],
     "icon": [
       "icons/icon.ico"

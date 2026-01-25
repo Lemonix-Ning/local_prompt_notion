@@ -159,8 +159,6 @@ export function useSystemNotification() {
   ) => {
     // Check throttle - prevent notification spam
     if (!throttlerRef.current.shouldShowNotification(taskId)) {
-      const timeRemaining = throttlerRef.current.getTimeUntilNextNotification(taskId);
-      console.log(`[notification] Throttled notification for task "${taskTitle}" (${Math.ceil(timeRemaining / 1000)}s remaining)`);
       return false;
     }
 

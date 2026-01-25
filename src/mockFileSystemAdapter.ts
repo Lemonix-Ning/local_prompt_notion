@@ -16,15 +16,17 @@ export class MockFileSystemAdapter implements IFileSystemAdapter {
       categories: mock.categories,
       allPrompts: mock.allPrompts,
     };
+    this.storage = new Map(
+      Array.from(this.mockData.allPrompts.values()).map(prompt => [prompt.path, prompt])
+    );
   }
 
   async scanVault(rootPath: string): Promise<FileSystemState> {
-    // 返回模拟数据
-    const mockData = this.getMockData();
+    this.mockData.root = rootPath;
     return {
       root: rootPath,
-      categories: mockData.categories,
-      allPrompts: mockData.allPrompts,
+      categories: this.mockData.categories,
+      allPrompts: this.mockData.allPrompts,
     };
   }
 
@@ -38,11 +40,24 @@ export class MockFileSystemAdapter implements IFileSystemAdapter {
 
   async savePrompt(promptData: PromptData): Promise<void> {
     this.storage.set(promptData.path, promptData);
+    this.mockData.allPrompts.set(promptData.meta.id, promptData);
   }
 
   async deletePrompt(promptPath: string, _permanent = false): Promise<void> {
-    // Mock 环境直接删除
     this.storage.delete(promptPath);
+    const removeFromCategory = (nodes: CategoryNode[]) => {
+      nodes.forEach(node => {
+        node.prompts = node.prompts.filter(prompt => prompt.path !== promptPath);
+        if (node.children.length > 0) {
+          removeFromCategory(node.children);
+        }
+      });
+    };
+    removeFromCategory(this.mockData.categories);
+    const toRemove = Array.from(this.mockData.allPrompts.values()).find(prompt => prompt.path === promptPath);
+    if (toRemove) {
+      this.mockData.allPrompts.delete(toRemove.meta.id);
+    }
   }
 
   async restorePrompt(_promptPath: string): Promise<void> {
@@ -80,11 +95,43 @@ export class MockFileSystemAdapter implements IFileSystemAdapter {
     };
 
     this.storage.set(promptPath, promptData);
+    this.mockData.allPrompts.set(meta.id, promptData);
+    const insertIntoCategory = (nodes: CategoryNode[]): boolean => {
+      for (const node of nodes) {
+        if (node.path === categoryPath) {
+          node.prompts.push(promptData);
+          return true;
+        }
+        if (node.children.length > 0 && insertIntoCategory(node.children)) return true;
+      }
+      return false;
+    };
+    insertIntoCategory(this.mockData.categories);
     return promptData;
   }
 
-  async createCategory(_parentPath: string, _name: string): Promise<void> {
-    // Mock implementation
+  async createCategory(parentPath: string, name: string): Promise<void> {
+    const newCategory: CategoryNode = {
+      name,
+      path: `${parentPath}/${name}`,
+      children: [],
+      prompts: [],
+    };
+    const insertIntoCategory = (nodes: CategoryNode[]): boolean => {
+      for (const node of nodes) {
+        if (node.path === parentPath) {
+          node.children.push(newCategory);
+          return true;
+        }
+        if (node.children.length > 0 && insertIntoCategory(node.children)) return true;
+      }
+      return false;
+    };
+    if (parentPath === this.mockData.root) {
+      this.mockData.categories.push(newCategory);
+      return;
+    }
+    insertIntoCategory(this.mockData.categories);
   }
 
   async renameCategory(categoryPath: string, newName: string): Promise<void> {
@@ -116,19 +163,39 @@ export class MockFileSystemAdapter implements IFileSystemAdapter {
   }
 
   async deleteCategory(categoryPath: string): Promise<void> {
-    // Mock 实现：从内存中删除分类
-    const removeCategory = (nodes: CategoryNode[], path: string): boolean => {
+    const collected: PromptData[] = [];
+    const collectPrompts = (node: CategoryNode) => {
+      collected.push(...node.prompts);
+      node.children.forEach(child => collectPrompts(child));
+    };
+    const removeCategory = (nodes: CategoryNode[], path: string): CategoryNode | null => {
       for (let i = 0; i < nodes.length; i++) {
         if (nodes[i].path === path) {
-          nodes.splice(i, 1);
-          return true;
+          const [removed] = nodes.splice(i, 1);
+          return removed ?? null;
         }
-        if (removeCategory(nodes[i].children, path)) return true;
+        const removed = removeCategory(nodes[i].children, path);
+        if (removed) return removed;
       }
-      return false;
+      return null;
     };
-
-    removeCategory(this.mockData.categories, categoryPath);
+    const removedCategory = removeCategory(this.mockData.categories, categoryPath);
+    if (!removedCategory) return;
+    collectPrompts(removedCategory);
+    const timestamp = Date.now();
+    collected.forEach((prompt, index) => {
+      const moved: PromptData = {
+        ...prompt,
+        path: `/vault/trash/${prompt.meta.slug}_${timestamp + index}`,
+        meta: {
+          ...prompt.meta,
+          updated_at: new Date().toISOString(),
+        },
+      };
+      this.storage.delete(prompt.path);
+      this.storage.set(moved.path, moved);
+      this.mockData.allPrompts.set(moved.meta.id, moved);
+    });
   }
 
   searchPrompts(query: string, prompts: PromptData[]): PromptData[] {

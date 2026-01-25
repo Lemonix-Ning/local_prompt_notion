@@ -106,9 +106,6 @@ Lumina 是一个全栈本地应用，用于沉淀与复用 AI 相关内容卡片
 
 ```
 Lumina/
-├── .ai/                          # AI 认知基础设施
-│   ├── context/                  # 协作规则/架构/项目状态
-│   └── index/                    # AI 结构化索引
 ├── src/                          # 前端源代码
 │   ├── components/               # React 组件
 │   │   ├── Sidebar.tsx           # 左侧导航(分类树、主题切换)
@@ -239,7 +236,7 @@ cd ..
 ```bash
 npm run dev
 ```
-打开 `http://localhost:5173`
+打开 `http://localhost:3000`
 
 #### 方式 2: 使用 API 模式(需要后端,数据持久化到本地)
 
@@ -252,7 +249,7 @@ npm start
 
 **终端 2 - 启动前端开发服务器**:
 ```bash
-npm run dev:client
+npm run dev:client:api
 # 打开 http://localhost:3000
 ```
 
@@ -260,6 +257,13 @@ npm run dev:client
 ```bash
 npm run dev:api
 ```
+
+#### 方式 3: 桌面开发模式 (Tauri)
+```bash
+npm run desktop:dev
+```
+- 默认使用 Mock 模式（不依赖 3001 后端）
+- 如需 API 模式，请先启动后端并将 `VITE_USE_MOCK=false`
 
 ### 构建生产版本
 
@@ -301,7 +305,7 @@ src-tauri/target/release/
 
 **桌面应用特性**:
 - 原生Windows应用体验
-- 桌面构建默认使用 Mock 适配器（文件 API 迁移后可恢复持久化）
+- 桌面构建默认使用 Mock 适配器（可切换 API 模式）
 - 完整功能，包含所有主题和交互特性
 - 支持绿色版(免安装)和安装包两种分发方式
 - 数据存储在可执行文件旁边的 `vault/` 目录

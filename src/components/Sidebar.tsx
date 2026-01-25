@@ -146,10 +146,11 @@ function SettingsPanel({
   sidebarWidth,
 }: SettingsPanelProps) {
   const { showToast } = useToast();
+  const { notifyMessage } = useLumi();
   const { themeMode, setThemeMode } = useTheme();
   const [closeBehavior, setCloseBehavior] = useState<'minimize' | 'exit'>('minimize');
-  const [autostartEnabled, setAutostartEnabled] = useState<boolean>(false);
-  const [autostartLoading, setAutostartLoading] = useState<boolean>(false);
+  const [autostartEnabled, setAutostartEnabled] = useState(false);
+  const [autostartLoading, setAutostartLoading] = useState(false);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -212,11 +213,11 @@ function SettingsPanel({
       if (autostartEnabled) {
         await disableAutostart();
         setAutostartEnabled(false);
-        showToast('已关闭开机自启动', 'success');
+        notifyMessage('已关闭开机自启动');
       } else {
         await enableAutostart();
         setAutostartEnabled(true);
-        showToast('已开启开机自启动', 'success');
+        notifyMessage('已开启开机自启动');
       }
     } catch {
       showToast('设置开机自启动失败', 'error');
@@ -526,7 +527,7 @@ export function Sidebar() {
   const { state, dispatch, createCategory, deleteCategory, renameCategory, moveCategory, refreshVault } = useApp();
   const { fileSystem, selectedCategory, uiState } = state;
   const { showToast } = useToast();
-  const { triggerAction } = useLumi();
+  const { triggerAction, notifyMessage } = useLumi();
   const [viewMode, setViewMode] = useState<'all' | 'favorites' | 'trash'>('all');
   const [isCreatingCategory, setIsCreatingCategory] = useState(false);
   const [newCategoryName, setNewCategoryName] = useState('');
@@ -741,7 +742,7 @@ export function Sidebar() {
       setIsCreatingCategory(false);
       setNewCategoryName('');
       setNewCategoryParent(null);
-      showToast('分类创建成功', 'success');
+      notifyMessage('分类创建成功');
     } catch (error) {
       showToast(`创建分类失败: ${(error as Error).message}`, 'error');
     }
@@ -875,7 +876,7 @@ export function Sidebar() {
     try {
       await deleteCategory(categoryPath);
       setDeleteDialog((prev) => ({ ...prev, isOpen: false }));
-      showToast('分类已移动到回收站', 'success');
+      notifyMessage('分类已移动到回收站');
     } catch (error) {
       showToast('删除失败: ' + (error as Error).message, 'error');
     }
@@ -921,6 +922,7 @@ export function Sidebar() {
         ref={sidebarRef}
         className="notion-sidebar backdrop-blur-xl flex flex-col relative"
         data-tauri-drag-region={false}
+        data-sidebar="true"
         style={{
           width: isSidebarOpen ? `${sidebarWidth}px` : '0px',
           transform: isSidebarOpen ? 'translateX(0)' : 'translateX(-24px)',
