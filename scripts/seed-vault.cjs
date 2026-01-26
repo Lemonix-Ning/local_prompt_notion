@@ -92,6 +92,20 @@ async function main() {
   await ensureDir(vaultRoot);
   await ensureDir(path.join(vaultRoot, 'trash'));
 
+  // 🔥 检查是否已经有数据，避免重复初始化
+  const existingCategories = await fs.readdir(vaultRoot);
+  const hasData = existingCategories.some(name => 
+    name !== 'trash' && name !== '.trash-visits.json'
+  );
+
+  if (hasData) {
+    console.log('========================================');
+    console.log('Vault already contains data, skipping seed');
+    console.log(`Vault: ${vaultRoot}`);
+    console.log('========================================');
+    return;
+  }
+
   const samples = [
     {
       categoryName: 'Coding',

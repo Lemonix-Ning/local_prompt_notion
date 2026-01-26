@@ -9,6 +9,7 @@
     "dev:client": "vite --port 3000 --strictPort",
     "dev:server": "set PORT=3001 && set VAULT_PATH=%cd%\\vault && npm --prefix server start",
     "dev:api": "concurrently -k -n server,client -c blue,green \"npm run dev:server\" \"npm run dev:client\"",
+    "postinstall": "node scripts/seed-vault.cjs",
     "seed:vault": "node scripts/seed-vault.cjs",
     "build": "tsc && vite build",
     "build:analyze": "npm run build && node scripts/analyze-bundle.mjs",
